@@ -1055,11 +1055,10 @@ int32_t Parcel::readExceptionCode() const
 {
   int32_t exception_code = readAligned<int32_t>();
   if (exception_code == EX_HAS_REPLY_HEADER) {
-    int32_t header_start = dataPosition();
     int32_t header_size = readAligned<int32_t>();
     // Skip over fat responses headers.  Not used (or propagated) in
     // native code
-    setDataPosition(header_start + header_size);
+    setDataPosition(dataPosition() + header_size);
     // And fat response headers are currently only used when there are no
     // exceptions, so return no error:
     return 0;
