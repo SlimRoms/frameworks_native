@@ -161,6 +161,7 @@ class ScreenshotClient
     PixelFormat mFormat;
 public:
     ScreenshotClient();
+    status_t update();
 
     // frees the previous screenshot and capture a new one
     status_t update(const sp<IBinder>& display);
