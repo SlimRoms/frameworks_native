@@ -81,6 +81,12 @@ public:
     static status_t getDisplayInfo(int32_t displayId, DisplayInfo* info);
 #endif
 
+#if defined(ICS_CAMERA_BLOB) || defined(MR0_CAMERA_BLOB)
+    static ssize_t getDisplayWidth(int32_t displayId);
+    static ssize_t getDisplayHeight(int32_t displayId);
+    static ssize_t getDisplayOrientation(int32_t displayId);
+#endif
+
     // ------------------------------------------------------------------------
     // surface creation / destruction
 
