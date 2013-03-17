@@ -29,9 +29,6 @@ extern "C" {
 #define ANDROID_BITMAP_RESULT_JNI_EXCEPTION     -2
 #define ANDROID_BITMAP_RESULT_ALLOCATION_FAILED -3
 
-/* Backward compatibility: this macro used to be misspelled. */
-#define ANDROID_BITMAP_RESUT_SUCCESS ANDROID_BITMAP_RESULT_SUCCESS
-
 enum AndroidBitmapFormat {
     ANDROID_BITMAP_FORMAT_NONE      = 0,
     ANDROID_BITMAP_FORMAT_RGBA_8888 = 1,

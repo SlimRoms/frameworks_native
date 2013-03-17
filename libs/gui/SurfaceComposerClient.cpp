@@ -621,7 +621,7 @@ void SurfaceComposerClient::unblankDisplay(const sp<IBinder>& token) {
     ComposerService::getComposerService()->unblank(token);
 }
 
-// TODO: Remove me.  Do not use.
+// TODO: Remove me. Do not use.
 // This is a compatibility shim for one product whose drivers are depending on
 // this legacy function (when they shouldn't).
 status_t SurfaceComposerClient::getDisplayInfo(
@@ -656,7 +656,7 @@ ScreenshotClient::ScreenshotClient()
     : mWidth(0), mHeight(0), mFormat(PIXEL_FORMAT_NONE) {
 }
 
-// TODO: Remove me. Do not use.
+// TODO: Remove me.  Do not use.
 // This is a compatibility shim for one product whose drivers are depending on
 // this legacy function (when they shouldn't).
 status_t ScreenshotClient::update() {

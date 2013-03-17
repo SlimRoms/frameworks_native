@@ -67,12 +67,6 @@ public:
     // Get information about a display
     static status_t getDisplayInfo(const sp<IBinder>& display, DisplayInfo* info);
 
-#if defined(ICS_CAMERA_BLOB) || defined(MR0_CAMERA_BLOB)
-    static ssize_t getDisplayWidth(int32_t displayId);
-    static ssize_t getDisplayHeight(int32_t displayId);
-    static ssize_t getDisplayOrientation(int32_t displayId);
-#endif
-
     /* triggers screen off and waits for it to complete */
     static void blankDisplay(const sp<IBinder>& display);
 
@@ -82,6 +76,12 @@ public:
     // This is a compatibility shim for one product whose drivers are depending on
     // this legacy function (when they shouldn't).
     static status_t getDisplayInfo(int32_t displayId, DisplayInfo* info);
+
+#if defined(ICS_CAMERA_BLOB) || defined(MR0_CAMERA_BLOB)
+    static ssize_t getDisplayWidth(int32_t displayId);
+    static ssize_t getDisplayHeight(int32_t displayId);
+    static ssize_t getDisplayOrientation(int32_t displayId);
+#endif
 
     // ------------------------------------------------------------------------
     // surface creation / destruction
@@ -173,6 +173,10 @@ class ScreenshotClient
     PixelFormat mFormat;
 public:
     ScreenshotClient();
+
+    // TODO: Remove me.  Do not use.
+    // This is a compatibility shim for one product whose drivers are depending on
+    // this legacy function (when they shouldn't).
     status_t update();
 
     // frees the previous screenshot and capture a new one

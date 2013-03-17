@@ -166,6 +166,7 @@ struct egl_surface_t
     virtual     EGLint      getSwapBehavior() const;
     virtual     EGLBoolean  swapBuffers();
     virtual     EGLBoolean  setSwapRectangle(EGLint l, EGLint t, EGLint w, EGLint h);
+    virtual     EGLClientBuffer getRenderBuffer() const;
 protected:
     GGLSurface              depth;
 };
@@ -210,6 +211,10 @@ EGLBoolean egl_surface_t::setSwapRectangle(
     return EGL_FALSE;
 }
 
+EGLClientBuffer egl_surface_t::getRenderBuffer() const {
+    return 0;
+}
+
 // ----------------------------------------------------------------------------
 
 struct egl_window_surface_v2_t : public egl_surface_t
@@ -234,6 +239,7 @@ struct egl_window_surface_v2_t : public egl_surface_t
     virtual     EGLint      getRefreshRate() const;
     virtual     EGLint      getSwapBehavior() const;
     virtual     EGLBoolean  setSwapRectangle(EGLint l, EGLint t, EGLint w, EGLint h);
+    virtual     EGLClientBuffer  getRenderBuffer() const;
     
 private:
     status_t lock(ANativeWindowBuffer* buf, int usage, void** vaddr);
@@ -581,6 +587,11 @@ EGLBoolean egl_window_surface_v2_t::setSwapRectangle(
     return EGL_TRUE;
 }
 
+EGLClientBuffer egl_window_surface_v2_t::getRenderBuffer() const
+{
+    return buffer;
+}
+
 EGLBoolean egl_window_surface_v2_t::bindDrawSurface(ogles_context_t* gl)
 {
     GGLSurface buffer;
@@ -811,6 +822,7 @@ static char const * const gExtensionsString =
         // "KHR_image_pixmap "
         "EGL_ANDROID_image_native_buffer "
         "EGL_ANDROID_swap_rectangle "
+	"EGL_ANDROID_get_render_buffer "
         ;
 
 // ----------------------------------------------------------------------------
@@ -871,6 +883,8 @@ static const extention_map_t gExtentionMap[] = {
             (__eglMustCastToProperFunctionPointerType)&eglGetSyncAttribKHR },
     { "eglSetSwapRectangleANDROID", 
             (__eglMustCastToProperFunctionPointerType)&eglSetSwapRectangleANDROID }, 
+    { "eglGetRenderBufferANDROID",
+            (__eglMustCastToProperFunctionPointerType)&eglGetRenderBufferANDROID },
 };
 
 /*
@@ -2163,4 +2177,19 @@ EGLBoolean eglSetSwapRectangleANDROID(EGLDisplay dpy, EGLSurface draw,
     d->setSwapRectangle(left, top, width, height);
 
     return EGL_TRUE;
+}
+
+EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
+{
+    if (egl_display_t::is_valid(dpy) == EGL_FALSE)
+        return setError(EGL_BAD_DISPLAY, (EGLClientBuffer)0);
+
+    egl_surface_t* d = static_cast<egl_surface_t*>(draw);
+    if (!d->isValid())
+        return setError(EGL_BAD_SURFACE, (EGLClientBuffer)0);
+    if (d->dpy != dpy)
+        return setError(EGL_BAD_DISPLAY, (EGLClientBuffer)0);
+
+    // post the surface
+    return d->getRenderBuffer();
 }

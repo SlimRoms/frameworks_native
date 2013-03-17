@@ -70,6 +70,8 @@ static const extention_map_t sExtentionMap[] = {
             (__eglMustCastToProperFunctionPointerType)&eglCreateImageKHR },
     { "eglDestroyImageKHR",
             (__eglMustCastToProperFunctionPointerType)&eglDestroyImageKHR },
+    { "eglGetRenderBufferANDROID",
+            (__eglMustCastToProperFunctionPointerType)&eglGetRenderBufferANDROID },
     { "eglGetSystemTimeFrequencyNV",
             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeFrequencyNV },
     { "eglGetSystemTimeNV",
@@ -760,8 +762,8 @@ __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *procname)
 
             egl_connection_t* const cnx = &gEGLImpl;
             if (cnx->dso && cnx->egl.eglGetProcAddress) {
+                found = true;
                 // Extensions are independent of the bound context
-                addr =
                 cnx->hooks[egl_connection_t::GLESv1_INDEX]->ext.extensions[slot] =
                 cnx->hooks[egl_connection_t::GLESv2_INDEX]->ext.extensions[slot] =
 #if EGL_TRACE
@@ -769,13 +771,10 @@ __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *procname)
                 gHooksTrace.ext.extensions[slot] =
 #endif
                         cnx->egl.eglGetProcAddress(procname);
-                if (addr) found = true;
             }
 
             if (found) {
-#if USE_FAST_TLS_KEY
                 addr = gExtensionForwarders[slot];
-#endif
                 sGLExtentionMap.add(name, addr);
                 sGLExtentionSlot++;
             }
@@ -1282,6 +1281,26 @@ EGLint eglWaitSyncANDROID(EGLDisplay dpy, EGLSyncKHR sync, EGLint flags)
         result = cnx->egl.eglWaitSyncANDROID(dp->disp.dpy, sync, flags);
     }
     return result;
+}
+
+// ----------------------------------------------------------------------------
+// QUALCOMM extensions
+// ----------------------------------------------------------------------------
+
+EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
+{
+    clearError();
+
+    const egl_display_ptr dp = validate_display(dpy);
+    if (!dp) return EGL_FALSE;
+
+    egl_surface_t const * const s = get_surface(draw);
+
+    egl_connection_t* const cnx = &gEGLImpl;
+    if (cnx->dso && cnx->egl.eglGetRenderBufferANDROID) {
+        return cnx->egl.eglGetRenderBufferANDROID(dp->disp.dpy, s->surface);
+    }
+    return setError(EGL_BAD_DISPLAY, (EGLClientBuffer*)0);
 }
 
 // ----------------------------------------------------------------------------
