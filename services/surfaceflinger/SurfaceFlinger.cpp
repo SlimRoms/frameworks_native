@@ -1612,8 +1612,14 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                                     state.frame.right, state.frame.bottom);
                             }
 #else
-                            disp->setProjection(state.orientation,
-                                state.viewport, state.frame);
+                            // Honor the orientation change after boot
+                            // animation completes or the new orientation is
+                            // same as panel orientation..
+                            if(mBootFinished ||
+                               state.orientation == disp->getOrientation()) {
+                                disp->setProjection(state.orientation,
+                                        state.viewport, state.frame);
+                            }
 #endif
                         }
                         if (state.width != draw[i].width || state.height != draw[i].height) {
