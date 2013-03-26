@@ -52,6 +52,8 @@
 
 using namespace android;
 
+EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw);
+
 // ----------------------------------------------------------------------------
 
 #define EGL_VERSION_HW_ANDROID  0x3143
