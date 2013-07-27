@@ -236,11 +236,9 @@ void fixup_glShaderSource(GLMessage *glmsg, void *pointersToFixup[]) {
     ::std::string src = "";
     for (int i = 0; i < count; i++) {
         if (lengthp != NULL)
-            src.append(*stringpp, *lengthp);
+            src.append(*stringpp++, *lengthp++);
         else
-            src.append(*stringpp);  // assume null terminated
-        stringpp++;
-        lengthp++;
+            src.append(*stringpp++);  // assume null terminated
     }
 
     arg_strpp->add_charvalue(src);
@@ -341,7 +339,7 @@ void fixup_glLinkProgram(GLMessage *glmsg) {
 /** Given a glGetActive[Uniform|Attrib] call, obtain the location
  *  of the variable of given name in the call.
  */
-int getShaderVariableLocation(GLTraceContext *context, GLMessage *glmsg, GLchar *name) {
+GLint getShaderVariableLocation(GLTraceContext *context, GLMessage *glmsg, GLchar *name) {
     GLMessage_Function func = glmsg->function();
     if (func != GLMessage::glGetActiveAttrib && func != GLMessage::glGetActiveUniform) {
         return -1;
@@ -374,7 +372,7 @@ void fixup_glGetActiveAttribOrUniform(GLTraceContext *context, GLMessage *glmsg,
     // In order to make things simpler for the debugger, we also pass
     // a hidden location argument that stores the actual location.
     // append the location value to the end of the argument list
-    int location = getShaderVariableLocation(context, glmsg, (GLchar*)pointersToFixup[3]);
+    GLint location = getShaderVariableLocation(context, glmsg, (GLchar*)pointersToFixup[3]);
     GLMessage_DataType *arg_location = glmsg->add_args();
     arg_location->set_isarray(false);
     arg_location->set_type(GLMessage::DataType::INT);

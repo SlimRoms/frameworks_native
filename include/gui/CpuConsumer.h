@@ -37,7 +37,7 @@ namespace android {
  * This queue is synchronous by default.
  */
 
-class CpuConsumer: public ConsumerBase
+class CpuConsumer : public ConsumerBase
 {
   public:
     typedef ConsumerBase::FrameAvailableListener FrameAvailableListener;
@@ -53,11 +53,19 @@ class CpuConsumer: public ConsumerBase
         uint32_t    scalingMode;
         int64_t     timestamp;
         uint64_t    frameNumber;
+        // Values below are only valid when using
+        // HAL_PIXEL_FORMAT_YCbCr_420_888, in which case LockedBuffer::data
+        // contains the Y channel, and stride is the Y channel stride. For other
+        // formats, these will all be 0.
+        uint8_t    *dataCb;
+        uint8_t    *dataCr;
+        uint32_t    chromaStride;
+        uint32_t    chromaStep;
     };
 
     // Create a new CPU consumer. The maxLockedBuffers parameter specifies
     // how many buffers can be locked for user access at the same time.
-    CpuConsumer(uint32_t maxLockedBuffers);
+    CpuConsumer(uint32_t maxLockedBuffers, bool synchronousMode = true);
 
     virtual ~CpuConsumer();
 
@@ -82,17 +90,32 @@ class CpuConsumer: public ConsumerBase
     // lockNextBuffer.
     status_t unlockBuffer(const LockedBuffer &nativeBuffer);
 
-    sp<ISurfaceTexture> getProducerInterface() const { return getBufferQueue(); }
+    sp<IGraphicBufferProducer> getProducerInterface() const { return getBufferQueue(); }
 
   private:
     // Maximum number of buffers that can be locked at a time
     uint32_t mMaxLockedBuffers;
 
+    status_t releaseAcquiredBufferLocked(int lockedIdx);
+
     virtual void freeBufferLocked(int slotIndex);
 
-    // Array for tracking pointers passed to the consumer, matching the
-    // mSlots indexing
-    void *mBufferPointers[BufferQueue::NUM_BUFFER_SLOTS];
+    // Tracking for buffers acquired by the user
+    struct AcquiredBuffer {
+        // Need to track the original mSlot index and the buffer itself because
+        // the mSlot entry may be freed/reused before the acquired buffer is
+        // released.
+        int mSlot;
+        sp<GraphicBuffer> mGraphicBuffer;
+        void *mBufferPointer;
+
+        AcquiredBuffer() :
+                mSlot(BufferQueue::INVALID_BUFFER_SLOT),
+                mBufferPointer(NULL) {
+        }
+    };
+    Vector<AcquiredBuffer> mAcquiredBuffers;
+
     // Count of currently locked buffers
     uint32_t mCurrentLockedBuffers;
 

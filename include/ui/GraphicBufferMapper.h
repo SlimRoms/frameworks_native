@@ -45,15 +45,16 @@ public:
     status_t lock(buffer_handle_t handle,
             int usage, const Rect& bounds, void** vaddr);
 
+    status_t lockYCbCr(buffer_handle_t handle,
+            int usage, const Rect& bounds, android_ycbcr *ycbcr);
+
     status_t unlock(buffer_handle_t handle);
+    
+    status_t perform(buffer_handle_t handle, int operation,
+                     uint32_t w, uint32_t h, uint32_t format);
 
 #ifdef EXYNOS4_ENHANCEMENTS
     status_t getphys(buffer_handle_t handle, void** paddr);
-#endif
-
-#ifdef QCOM_BSP
-    status_t perform(buffer_handle_t handle, int operation,
-                     uint32_t w, uint32_t h, uint32_t format);
 #endif
 
     // dumps information about the mapping of this handle

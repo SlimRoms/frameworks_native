@@ -17,8 +17,9 @@
 //#define LOG_NDEBUG 0
 #define LOG_TAG "CpuConsumer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#include <utils/Log.h>
 
+#include <cutils/compiler.h>
+#include <utils/Log.h>
 #include <gui/CpuConsumer.h>
 
 #define CC_LOGV(x, ...) ALOGV("[%s] "x, mName.string(), ##__VA_ARGS__)
@@ -29,23 +30,24 @@
 
 namespace android {
 
-CpuConsumer::CpuConsumer(uint32_t maxLockedBuffers) :
+CpuConsumer::CpuConsumer(uint32_t maxLockedBuffers, bool synchronousMode) :
     ConsumerBase(new BufferQueue(true) ),
     mMaxLockedBuffers(maxLockedBuffers),
     mCurrentLockedBuffers(0)
 {
+    // Create tracking entries for locked buffers
+    mAcquiredBuffers.insertAt(0, maxLockedBuffers);
 
-    for (int i = 0; i < BufferQueue::NUM_BUFFER_SLOTS; i++) {
-        mBufferPointers[i] = NULL;
-    }
-
-    mBufferQueue->setSynchronousMode(true);
+    mBufferQueue->setSynchronousMode(synchronousMode);
     mBufferQueue->setConsumerUsageBits(GRALLOC_USAGE_SW_READ_OFTEN);
     mBufferQueue->setMaxAcquiredBufferCount(maxLockedBuffers);
 }
 
 CpuConsumer::~CpuConsumer() {
+    // ConsumerBase destructor does all the work.
 }
+
+
 
 void CpuConsumer::setName(const String8& name) {
     Mutex::Autolock _l(mMutex);
@@ -78,7 +80,7 @@ status_t CpuConsumer::lockNextBuffer(LockedBuffer *nativeBuffer) {
     int buf = b.mBuf;
 
     if (b.mFence.get()) {
-        err = b.mFence->waitForever(1000, "CpuConsumer::lockNextBuffer");
+        err = b.mFence->waitForever("CpuConsumer::lockNextBuffer");
         if (err != OK) {
             CC_LOGE("Failed to wait for fence of acquired buffer: %s (%d)",
                     strerror(-err), err);
@@ -86,28 +88,68 @@ status_t CpuConsumer::lockNextBuffer(LockedBuffer *nativeBuffer) {
         }
     }
 
-    err = mSlots[buf].mGraphicBuffer->lock(
-        GraphicBuffer::USAGE_SW_READ_OFTEN,
-        b.mCrop,
-        &mBufferPointers[buf]);
+    void *bufferPointer = NULL;
+    android_ycbcr ycbcr = android_ycbcr();
 
-    if (mBufferPointers[buf] != NULL && err != OK) {
-        CC_LOGE("Unable to lock buffer for CPU reading: %s (%d)", strerror(-err),
-                err);
-        return err;
+    if (mSlots[buf].mGraphicBuffer->getPixelFormat() ==
+            HAL_PIXEL_FORMAT_YCbCr_420_888) {
+        err = mSlots[buf].mGraphicBuffer->lockYCbCr(
+            GraphicBuffer::USAGE_SW_READ_OFTEN,
+            b.mCrop,
+            &ycbcr);
+
+        if (err != OK) {
+            CC_LOGE("Unable to lock YCbCr buffer for CPU reading: %s (%d)",
+                    strerror(-err), err);
+            return err;
+        }
+        bufferPointer = ycbcr.y;
+    } else {
+        err = mSlots[buf].mGraphicBuffer->lock(
+            GraphicBuffer::USAGE_SW_READ_OFTEN,
+            b.mCrop,
+            &bufferPointer);
+
+        if (err != OK) {
+            CC_LOGE("Unable to lock buffer for CPU reading: %s (%d)",
+                    strerror(-err), err);
+            return err;
+        }
     }
 
-    nativeBuffer->data   = reinterpret_cast<uint8_t*>(mBufferPointers[buf]);
+    size_t lockedIdx = 0;
+    for (; lockedIdx < mMaxLockedBuffers; lockedIdx++) {
+        if (mAcquiredBuffers[lockedIdx].mSlot ==
+                BufferQueue::INVALID_BUFFER_SLOT) {
+            break;
+        }
+    }
+    assert(lockedIdx < mMaxLockedBuffers);
+
+    AcquiredBuffer &ab = mAcquiredBuffers.editItemAt(lockedIdx);
+    ab.mSlot = buf;
+    ab.mBufferPointer = bufferPointer;
+    ab.mGraphicBuffer = mSlots[buf].mGraphicBuffer;
+
+    nativeBuffer->data   =
+            reinterpret_cast<uint8_t*>(bufferPointer);
     nativeBuffer->width  = mSlots[buf].mGraphicBuffer->getWidth();
     nativeBuffer->height = mSlots[buf].mGraphicBuffer->getHeight();
     nativeBuffer->format = mSlots[buf].mGraphicBuffer->getPixelFormat();
-    nativeBuffer->stride = mSlots[buf].mGraphicBuffer->getStride();
+    nativeBuffer->stride = (ycbcr.y != NULL) ?
+            ycbcr.ystride :
+            mSlots[buf].mGraphicBuffer->getStride();
 
     nativeBuffer->crop        = b.mCrop;
     nativeBuffer->transform   = b.mTransform;
     nativeBuffer->scalingMode = b.mScalingMode;
     nativeBuffer->timestamp   = b.mTimestamp;
     nativeBuffer->frameNumber = b.mFrameNumber;
+
+    nativeBuffer->dataCb       = reinterpret_cast<uint8_t*>(ycbcr.cb);
+    nativeBuffer->dataCr       = reinterpret_cast<uint8_t*>(ycbcr.cr);
+    nativeBuffer->chromaStride = ycbcr.cstride;
+    nativeBuffer->chromaStep   = ycbcr.chroma_step;
 
     mCurrentLockedBuffers++;
 
@@ -116,43 +158,50 @@ status_t CpuConsumer::lockNextBuffer(LockedBuffer *nativeBuffer) {
 
 status_t CpuConsumer::unlockBuffer(const LockedBuffer &nativeBuffer) {
     Mutex::Autolock _l(mMutex);
-    int slotIndex = 0;
+    size_t lockedIdx = 0;
     status_t err;
 
     void *bufPtr = reinterpret_cast<void *>(nativeBuffer.data);
-    for (; slotIndex < BufferQueue::NUM_BUFFER_SLOTS; slotIndex++) {
-        if (bufPtr == mBufferPointers[slotIndex]) break;
+    for (; lockedIdx < mMaxLockedBuffers; lockedIdx++) {
+        if (bufPtr == mAcquiredBuffers[lockedIdx].mBufferPointer) break;
     }
-    if (slotIndex == BufferQueue::NUM_BUFFER_SLOTS) {
+    if (lockedIdx == mMaxLockedBuffers) {
         CC_LOGE("%s: Can't find buffer to free", __FUNCTION__);
         return BAD_VALUE;
     }
 
-    mBufferPointers[slotIndex] = NULL;
-    err = mSlots[slotIndex].mGraphicBuffer->unlock();
+    return releaseAcquiredBufferLocked(lockedIdx);
+}
+
+status_t CpuConsumer::releaseAcquiredBufferLocked(int lockedIdx) {
+    status_t err;
+
+    err = mAcquiredBuffers[lockedIdx].mGraphicBuffer->unlock();
     if (err != OK) {
-        CC_LOGE("%s: Unable to unlock graphic buffer %d", __FUNCTION__, slotIndex);
+        CC_LOGE("%s: Unable to unlock graphic buffer %d", __FUNCTION__,
+                lockedIdx);
         return err;
     }
-    releaseBufferLocked(slotIndex, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR);
+    int buf = mAcquiredBuffers[lockedIdx].mSlot;
+
+    // release the buffer if it hasn't already been freed by the BufferQueue.
+    // This can happen, for example, when the producer of this buffer
+    // disconnected after this buffer was acquired.
+    if (CC_LIKELY(mAcquiredBuffers[lockedIdx].mGraphicBuffer ==
+            mSlots[buf].mGraphicBuffer)) {
+        releaseBufferLocked(buf, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR);
+    }
+
+    AcquiredBuffer &ab = mAcquiredBuffers.editItemAt(lockedIdx);
+    ab.mSlot = BufferQueue::INVALID_BUFFER_SLOT;
+    ab.mBufferPointer = NULL;
+    ab.mGraphicBuffer.clear();
 
     mCurrentLockedBuffers--;
-
     return OK;
 }
 
 void CpuConsumer::freeBufferLocked(int slotIndex) {
-    if (mBufferPointers[slotIndex] != NULL) {
-        status_t err;
-        CC_LOGW("Buffer %d freed while locked by consumer", slotIndex);
-        mBufferPointers[slotIndex] = NULL;
-        err = mSlots[slotIndex].mGraphicBuffer->unlock();
-        if (err != OK) {
-            CC_LOGE("%s: Unable to unlock graphic buffer %d", __FUNCTION__,
-                    slotIndex);
-        }
-        mCurrentLockedBuffers--;
-    }
     ConsumerBase::freeBufferLocked(slotIndex);
 }
 

@@ -1,4 +1,4 @@
-**
+/*
 ** Copyright 2012, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,8 +27,8 @@
 #include <EGL/egl.h>
 
 #include <gui/Surface.h>
-#include <gui/SurfaceTexture.h>
-#include <gui/SurfaceTextureClient.h>
+#include <gui/GLConsumer.h>
+#include <gui/Surface.h>
 
 #include <ui/ANativeObjectBase.h>
 

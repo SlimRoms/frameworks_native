@@ -18,6 +18,9 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 //#define LOG_NDEBUG 0
 
+ // This is needed for stdint.h to define INT64_MAX in C++
+ #define __STDC_LIMIT_MACROS
+
 #include <sync/sync.h>
 #include <ui/Fence.h>
 #include <unistd.h>
@@ -26,7 +29,7 @@
 
 namespace android {
 
-const sp<Fence> Fence::NO_FENCE = sp<Fence>();
+const sp<Fence> Fence::NO_FENCE = sp<Fence>(new Fence);
 
 Fence::Fence() :
     mFenceFd(-1) {
@@ -51,11 +54,12 @@ status_t Fence::wait(unsigned int timeout) {
     return err < 0 ? -errno : status_t(NO_ERROR);
 }
 
-status_t Fence::waitForever(unsigned int warningTimeout, const char* logname) {
+status_t Fence::waitForever(const char* logname) {
     ATRACE_CALL();
     if (mFenceFd == -1) {
         return NO_ERROR;
     }
+    unsigned int warningTimeout = 3000;
     int err = sync_wait(mFenceFd, warningTimeout);
     if (err < 0 && errno == ETIME) {
         ALOGE("%s: fence %d didn't signal in %u ms", logname, mFenceFd,
@@ -68,7 +72,19 @@ status_t Fence::waitForever(unsigned int warningTimeout, const char* logname) {
 sp<Fence> Fence::merge(const String8& name, const sp<Fence>& f1,
         const sp<Fence>& f2) {
     ATRACE_CALL();
-    int result = sync_merge(name.string(), f1->mFenceFd, f2->mFenceFd);
+    int result;
+    // Merge the two fences.  In the case where one of the fences is not a
+    // valid fence (e.g. NO_FENCE) we merge the one valid fence with itself so
+    // that a new fence with the given name is created.
+    if (f1->isValid() && f2->isValid()) {
+        result = sync_merge(name.string(), f1->mFenceFd, f2->mFenceFd);
+    } else if (f1->isValid()) {
+        result = sync_merge(name.string(), f1->mFenceFd, f1->mFenceFd);
+    } else if (f2->isValid()) {
+        result = sync_merge(name.string(), f2->mFenceFd, f2->mFenceFd);
+    } else {
+        return NO_FENCE;
+    }
     if (result == -1) {
         status_t err = -errno;
         ALOGE("merge: sync_merge(\"%s\", %d, %d) returned an error: %s (%d)",
@@ -80,10 +96,34 @@ sp<Fence> Fence::merge(const String8& name, const sp<Fence>& f1,
 }
 
 int Fence::dup() const {
+    return ::dup(mFenceFd);
+}
+
+nsecs_t Fence::getSignalTime() const {
     if (mFenceFd == -1) {
         return -1;
     }
-    return ::dup(mFenceFd);
+
+    struct sync_fence_info_data* finfo = sync_fence_info(mFenceFd);
+    if (finfo == NULL) {
+        ALOGE("sync_fence_info returned NULL for fd %d", mFenceFd);
+        return -1;
+    }
+    if (finfo->status != 1) {
+        sync_fence_info_free(finfo);
+        return INT64_MAX;
+    }
+
+    struct sync_pt_info* pinfo = NULL;
+    uint64_t timestamp = 0;
+    while ((pinfo = sync_pt_info(finfo, pinfo)) != NULL) {
+        if (pinfo->timestamp_ns > timestamp) {
+            timestamp = pinfo->timestamp_ns;
+        }
+    }
+    sync_fence_info_free(finfo);
+
+    return nsecs_t(timestamp);
 }
 
 size_t Fence::getFlattenedSize() const {
@@ -91,22 +131,24 @@ size_t Fence::getFlattenedSize() const {
 }
 
 size_t Fence::getFdCount() const {
-    return 1;
+    return isValid() ? 1 : 0;
 }
 
 status_t Fence::flatten(void* buffer, size_t size, int fds[],
         size_t count) const {
-    if (size != 0 || count != 1) {
+    if (size != getFlattenedSize() || count != getFdCount()) {
         return BAD_VALUE;
     }
 
-    fds[0] = mFenceFd;
+    if (isValid()) {
+        fds[0] = mFenceFd;
+    }
     return NO_ERROR;
 }
 
 status_t Fence::unflatten(void const* buffer, size_t size, int fds[],
         size_t count) {
-    if (size != 0 || count != 1) {
+    if (size != 0 || (count != 0 && count != 1)) {
         return BAD_VALUE;
     }
     if (mFenceFd != -1) {
@@ -114,7 +156,10 @@ status_t Fence::unflatten(void const* buffer, size_t size, int fds[],
         return INVALID_OPERATION;
     }
 
-    mFenceFd = fds[0];
+    if (count == 1) {
+        mFenceFd = fds[0];
+    }
+
     return NO_ERROR;
 }
 

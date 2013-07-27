@@ -31,7 +31,8 @@
 
 #include <ui/DisplayInfo.h>
 
-#include <gui/ISurface.h>
+#include <gui/CpuConsumer.h>
+#include <gui/IGraphicBufferProducer.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/ISurfaceComposerClient.h>
 #include <gui/SurfaceComposerClient.h>
@@ -115,18 +116,20 @@ class Composer : public Singleton<Composer>
     SortedVector<ComposerState> mComposerStates;
     SortedVector<DisplayState > mDisplayStates;
     uint32_t                    mForceSynchronous;
+    uint32_t                    mTransactionNestCount;
     bool                        mAnimation;
 
     Composer() : Singleton<Composer>(),
-        mForceSynchronous(0),
+        mForceSynchronous(0), mTransactionNestCount(0),
         mAnimation(false)
     { }
 
+    void openGlobalTransactionImpl();
     void closeGlobalTransactionImpl(bool synchronous);
     void setAnimationTransactionImpl();
 
     layer_state_t* getLayerStateLocked(
-            const sp<SurfaceComposerClient>& client, SurfaceID id);
+            const sp<SurfaceComposerClient>& client, const sp<IBinder>& id);
 
     DisplayState& getDisplayStateLocked(const sp<IBinder>& token);
 
@@ -134,28 +137,29 @@ public:
     sp<IBinder> createDisplay(const String8& displayName, bool secure);
     sp<IBinder> getBuiltInDisplay(int32_t id);
 
-    status_t setPosition(const sp<SurfaceComposerClient>& client, SurfaceID id,
+    status_t setPosition(const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
             float x, float y);
-    status_t setSize(const sp<SurfaceComposerClient>& client, SurfaceID id,
+    status_t setSize(const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
             uint32_t w, uint32_t h);
-    status_t setLayer(const sp<SurfaceComposerClient>& client, SurfaceID id,
+    status_t setLayer(const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
             int32_t z);
-    status_t setFlags(const sp<SurfaceComposerClient>& client, SurfaceID id,
+    status_t setFlags(const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
             uint32_t flags, uint32_t mask);
     status_t setTransparentRegionHint(
-            const sp<SurfaceComposerClient>& client, SurfaceID id,
+            const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
             const Region& transparentRegion);
-    status_t setAlpha(const sp<SurfaceComposerClient>& client, SurfaceID id,
+    status_t setAlpha(const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
             float alpha);
-    status_t setMatrix(const sp<SurfaceComposerClient>& client, SurfaceID id,
+    status_t setMatrix(const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
             float dsdx, float dtdx, float dsdy, float dtdy);
     status_t setOrientation(int orientation);
-    status_t setCrop(const sp<SurfaceComposerClient>& client, SurfaceID id,
+    status_t setCrop(const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
             const Rect& crop);
     status_t setLayerStack(const sp<SurfaceComposerClient>& client,
-            SurfaceID id, uint32_t layerStack);
+            const sp<IBinder>& id, uint32_t layerStack);
 
-    void setDisplaySurface(const sp<IBinder>& token, const sp<ISurfaceTexture>& surface);
+    void setDisplaySurface(const sp<IBinder>& token,
+            const sp<IGraphicBufferProducer>& bufferProducer);
     void setDisplayLayerStack(const sp<IBinder>& token, uint32_t layerStack);
     void setDisplayProjection(const sp<IBinder>& token,
             uint32_t orientation,
@@ -164,6 +168,10 @@ public:
 
     static void setAnimationTransaction() {
         Composer::getInstance().setAnimationTransactionImpl();
+    }
+
+    static void openGlobalTransaction() {
+        Composer::getInstance().openGlobalTransactionImpl();
     }
 
     static void closeGlobalTransaction(bool synchronous) {
@@ -184,6 +192,13 @@ sp<IBinder> Composer::getBuiltInDisplay(int32_t id) {
     return ComposerService::getComposerService()->getBuiltInDisplay(id);
 }
 
+void Composer::openGlobalTransactionImpl() {
+    { // scope for the lock
+        Mutex::Autolock _l(mLock);
+        mTransactionNestCount += 1;
+    }
+}
+
 void Composer::closeGlobalTransactionImpl(bool synchronous) {
     sp<ISurfaceComposer> sm(ComposerService::getComposerService());
 
@@ -193,13 +208,21 @@ void Composer::closeGlobalTransactionImpl(bool synchronous) {
 
     { // scope for the lock
         Mutex::Autolock _l(mLock);
+        mForceSynchronous |= synchronous;
+        if (!mTransactionNestCount) {
+            ALOGW("At least one call to closeGlobalTransaction() was not matched by a prior "
+                    "call to openGlobalTransaction().");
+        } else if (--mTransactionNestCount) {
+            return;
+        }
+
         transaction = mComposerStates;
         mComposerStates.clear();
 
         displayTransaction = mDisplayStates;
         mDisplayStates.clear();
 
-        if (synchronous || mForceSynchronous) {
+        if (mForceSynchronous) {
             flags |= ISurfaceComposer::eSynchronous;
         }
         if (mAnimation) {
@@ -219,7 +242,7 @@ void Composer::setAnimationTransactionImpl() {
 }
 
 layer_state_t* Composer::getLayerStateLocked(
-        const sp<SurfaceComposerClient>& client, SurfaceID id) {
+        const sp<SurfaceComposerClient>& client, const sp<IBinder>& id) {
 
     ComposerState s;
     s.client = client->mClient;
@@ -236,7 +259,7 @@ layer_state_t* Composer::getLayerStateLocked(
 }
 
 status_t Composer::setPosition(const sp<SurfaceComposerClient>& client,
-        SurfaceID id, float x, float y) {
+        const sp<IBinder>& id, float x, float y) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
     if (!s)
@@ -248,7 +271,7 @@ status_t Composer::setPosition(const sp<SurfaceComposerClient>& client,
 }
 
 status_t Composer::setSize(const sp<SurfaceComposerClient>& client,
-        SurfaceID id, uint32_t w, uint32_t h) {
+        const sp<IBinder>& id, uint32_t w, uint32_t h) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
     if (!s)
@@ -264,7 +287,7 @@ status_t Composer::setSize(const sp<SurfaceComposerClient>& client,
 }
 
 status_t Composer::setLayer(const sp<SurfaceComposerClient>& client,
-        SurfaceID id, int32_t z) {
+        const sp<IBinder>& id, int32_t z) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
     if (!s)
@@ -275,7 +298,7 @@ status_t Composer::setLayer(const sp<SurfaceComposerClient>& client,
 }
 
 status_t Composer::setFlags(const sp<SurfaceComposerClient>& client,
-        SurfaceID id, uint32_t flags,
+        const sp<IBinder>& id, uint32_t flags,
         uint32_t mask) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
@@ -289,7 +312,7 @@ status_t Composer::setFlags(const sp<SurfaceComposerClient>& client,
 }
 
 status_t Composer::setTransparentRegionHint(
-        const sp<SurfaceComposerClient>& client, SurfaceID id,
+        const sp<SurfaceComposerClient>& client, const sp<IBinder>& id,
         const Region& transparentRegion) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
@@ -301,7 +324,7 @@ status_t Composer::setTransparentRegionHint(
 }
 
 status_t Composer::setAlpha(const sp<SurfaceComposerClient>& client,
-        SurfaceID id, float alpha) {
+        const sp<IBinder>& id, float alpha) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
     if (!s)
@@ -312,7 +335,7 @@ status_t Composer::setAlpha(const sp<SurfaceComposerClient>& client,
 }
 
 status_t Composer::setLayerStack(const sp<SurfaceComposerClient>& client,
-        SurfaceID id, uint32_t layerStack) {
+        const sp<IBinder>& id, uint32_t layerStack) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
     if (!s)
@@ -323,7 +346,7 @@ status_t Composer::setLayerStack(const sp<SurfaceComposerClient>& client,
 }
 
 status_t Composer::setMatrix(const sp<SurfaceComposerClient>& client,
-        SurfaceID id, float dsdx, float dtdx,
+        const sp<IBinder>& id, float dsdx, float dtdx,
         float dsdy, float dtdy) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
@@ -340,7 +363,7 @@ status_t Composer::setMatrix(const sp<SurfaceComposerClient>& client,
 }
 
 status_t Composer::setCrop(const sp<SurfaceComposerClient>& client,
-        SurfaceID id, const Rect& crop) {
+        const sp<IBinder>& id, const Rect& crop) {
     Mutex::Autolock _l(mLock);
     layer_state_t* s = getLayerStateLocked(client, id);
     if (!s)
@@ -365,10 +388,10 @@ DisplayState& Composer::getDisplayStateLocked(const sp<IBinder>& token) {
 }
 
 void Composer::setDisplaySurface(const sp<IBinder>& token,
-        const sp<ISurfaceTexture>& surface) {
+        const sp<IGraphicBufferProducer>& bufferProducer) {
     Mutex::Autolock _l(mLock);
     DisplayState& s(getDisplayStateLocked(token));
-    s.surface = surface;
+    s.surface = bufferProducer;
     s.what |= DisplayState::eSurfaceChanged;
 }
 
@@ -481,16 +504,18 @@ sp<SurfaceControl> SurfaceComposerClient::createSurface(
         PixelFormat format,
         uint32_t flags)
 {
-    sp<SurfaceControl> result;
+    sp<SurfaceControl> sur;
     if (mStatus == NO_ERROR) {
-        ISurfaceComposerClient::surface_data_t data;
-        sp<ISurface> surface = mClient->createSurface(&data, name,
-                w, h, format, flags);
-        if (surface != 0) {
-            result = new SurfaceControl(this, surface, data);
+        sp<IBinder> handle;
+        sp<IGraphicBufferProducer> gbp;
+        status_t err = mClient->createSurface(name, w, h, format, flags,
+                &handle, &gbp);
+        ALOGE_IF(err, "SurfaceComposerClient::createSurface error %s", strerror(-err));
+        if (err == NO_ERROR) {
+            sur = new SurfaceControl(this, handle, gbp);
         }
     }
-    return result;
+    return sur;
 }
 
 sp<IBinder> SurfaceComposerClient::createDisplay(const String8& displayName,
@@ -502,7 +527,7 @@ sp<IBinder> SurfaceComposerClient::getBuiltInDisplay(int32_t id) {
     return Composer::getInstance().getBuiltInDisplay(id);
 }
 
-status_t SurfaceComposerClient::destroySurface(SurfaceID sid) {
+status_t SurfaceComposerClient::destroySurface(const sp<IBinder>& sid) {
     if (mStatus != NO_ERROR)
         return mStatus;
     status_t err = mClient->destroySurface(sid);
@@ -516,7 +541,7 @@ inline Composer& SurfaceComposerClient::getComposer() {
 // ----------------------------------------------------------------------------
 
 void SurfaceComposerClient::openGlobalTransaction() {
-    // Currently a no-op
+    Composer::openGlobalTransaction();
 }
 
 void SurfaceComposerClient::closeGlobalTransaction(bool synchronous) {
@@ -529,53 +554,53 @@ void SurfaceComposerClient::setAnimationTransaction() {
 
 // ----------------------------------------------------------------------------
 
-status_t SurfaceComposerClient::setCrop(SurfaceID id, const Rect& crop) {
+status_t SurfaceComposerClient::setCrop(const sp<IBinder>& id, const Rect& crop) {
     return getComposer().setCrop(this, id, crop);
 }
 
-status_t SurfaceComposerClient::setPosition(SurfaceID id, float x, float y) {
+status_t SurfaceComposerClient::setPosition(const sp<IBinder>& id, float x, float y) {
     return getComposer().setPosition(this, id, x, y);
 }
 
-status_t SurfaceComposerClient::setSize(SurfaceID id, uint32_t w, uint32_t h) {
+status_t SurfaceComposerClient::setSize(const sp<IBinder>& id, uint32_t w, uint32_t h) {
     return getComposer().setSize(this, id, w, h);
 }
 
-status_t SurfaceComposerClient::setLayer(SurfaceID id, int32_t z) {
+status_t SurfaceComposerClient::setLayer(const sp<IBinder>& id, int32_t z) {
     return getComposer().setLayer(this, id, z);
 }
 
-status_t SurfaceComposerClient::hide(SurfaceID id) {
+status_t SurfaceComposerClient::hide(const sp<IBinder>& id) {
     return getComposer().setFlags(this, id,
             layer_state_t::eLayerHidden,
             layer_state_t::eLayerHidden);
 }
 
-status_t SurfaceComposerClient::show(SurfaceID id) {
+status_t SurfaceComposerClient::show(const sp<IBinder>& id) {
     return getComposer().setFlags(this, id,
             0,
             layer_state_t::eLayerHidden);
 }
 
-status_t SurfaceComposerClient::setFlags(SurfaceID id, uint32_t flags,
+status_t SurfaceComposerClient::setFlags(const sp<IBinder>& id, uint32_t flags,
         uint32_t mask) {
     return getComposer().setFlags(this, id, flags, mask);
 }
 
-status_t SurfaceComposerClient::setTransparentRegionHint(SurfaceID id,
+status_t SurfaceComposerClient::setTransparentRegionHint(const sp<IBinder>& id,
         const Region& transparentRegion) {
     return getComposer().setTransparentRegionHint(this, id, transparentRegion);
 }
 
-status_t SurfaceComposerClient::setAlpha(SurfaceID id, float alpha) {
+status_t SurfaceComposerClient::setAlpha(const sp<IBinder>& id, float alpha) {
     return getComposer().setAlpha(this, id, alpha);
 }
 
-status_t SurfaceComposerClient::setLayerStack(SurfaceID id, uint32_t layerStack) {
+status_t SurfaceComposerClient::setLayerStack(const sp<IBinder>& id, uint32_t layerStack) {
     return getComposer().setLayerStack(this, id, layerStack);
 }
 
-status_t SurfaceComposerClient::setMatrix(SurfaceID id, float dsdx, float dtdx,
+status_t SurfaceComposerClient::setMatrix(const sp<IBinder>& id, float dsdx, float dtdx,
         float dsdy, float dtdy) {
     return getComposer().setMatrix(this, id, dsdx, dtdx, dsdy, dtdy);
 }
@@ -588,8 +613,8 @@ status_t SurfaceComposerClient::setOrientation(int32_t dpy, int orientation, uin
 // ----------------------------------------------------------------------------
 
 void SurfaceComposerClient::setDisplaySurface(const sp<IBinder>& token,
-        const sp<ISurfaceTexture>& surface) {
-    Composer::getInstance().setDisplaySurface(token, surface);
+        const sp<IGraphicBufferProducer>& bufferProducer) {
+    Composer::getInstance().setDisplaySurface(token, bufferProducer);
 }
 
 void SurfaceComposerClient::setDisplayLayerStack(const sp<IBinder>& token,
@@ -621,7 +646,7 @@ void SurfaceComposerClient::unblankDisplay(const sp<IBinder>& token) {
     ComposerService::getComposerService()->unblank(token);
 }
 
-// TODO: Remove me. Do not use.
+// TODO: Remove me.  Do not use.
 // This is a compatibility shim for one product whose drivers are depending on
 // this legacy function (when they shouldn't).
 status_t SurfaceComposerClient::getDisplayInfo(
@@ -652,35 +677,33 @@ ssize_t SurfaceComposerClient::getDisplayOrientation(int32_t displayId) {
 
 // ----------------------------------------------------------------------------
 
+status_t ScreenshotClient::capture(
+        const sp<IBinder>& display,
+        const sp<IGraphicBufferProducer>& producer,
+        uint32_t reqWidth, uint32_t reqHeight,
+        uint32_t minLayerZ, uint32_t maxLayerZ) {
+    sp<ISurfaceComposer> s(ComposerService::getComposerService());
+    if (s == NULL) return NO_INIT;
+    return s->captureScreen(display, producer,
+            reqWidth, reqHeight, minLayerZ, maxLayerZ,
+            false);
+}
+
 ScreenshotClient::ScreenshotClient()
-    : mWidth(0), mHeight(0), mFormat(PIXEL_FORMAT_NONE) {
+    : mHaveBuffer(false) {
+    memset(&mBuffer, 0, sizeof(mBuffer));
 }
 
-// TODO: Remove me.  Do not use.
-// This is a compatibility shim for one product whose drivers are depending on
-// this legacy function (when they shouldn't).
-status_t ScreenshotClient::update() {
-    sp<ISurfaceComposer> sm(ComposerService::getComposerService());
-    return update(sm->getBuiltInDisplay(0));
+ScreenshotClient::~ScreenshotClient() {
+    ScreenshotClient::release();
 }
 
-status_t ScreenshotClient::update(const sp<IBinder>& display) {
-    sp<ISurfaceComposer> s(ComposerService::getComposerService());
-    if (s == NULL) return NO_INIT;
-    mHeap = 0;
-    return s->captureScreen(display, &mHeap,
-            &mWidth, &mHeight, &mFormat, 0, 0,
-            0, -1UL);
-}
-
-status_t ScreenshotClient::update(const sp<IBinder>& display,
-        uint32_t reqWidth, uint32_t reqHeight) {
-    sp<ISurfaceComposer> s(ComposerService::getComposerService());
-    if (s == NULL) return NO_INIT;
-    mHeap = 0;
-    return s->captureScreen(display, &mHeap,
-            &mWidth, &mHeight, &mFormat, reqWidth, reqHeight,
-            0, -1UL);
+sp<CpuConsumer> ScreenshotClient::getCpuConsumer() const {
+    if (mCpuConsumer == NULL) {
+        mCpuConsumer = new CpuConsumer(1);
+        mCpuConsumer->setName(String8("ScreenshotClient"));
+    }
+    return mCpuConsumer;
 }
 
 status_t ScreenshotClient::update(const sp<IBinder>& display,
@@ -688,38 +711,66 @@ status_t ScreenshotClient::update(const sp<IBinder>& display,
         uint32_t minLayerZ, uint32_t maxLayerZ) {
     sp<ISurfaceComposer> s(ComposerService::getComposerService());
     if (s == NULL) return NO_INIT;
-    mHeap = 0;
-    return s->captureScreen(display, &mHeap,
-            &mWidth, &mHeight, &mFormat, reqWidth, reqHeight,
-            minLayerZ, maxLayerZ);
+    sp<CpuConsumer> cpuConsumer = getCpuConsumer();
+
+    if (mHaveBuffer) {
+        mCpuConsumer->unlockBuffer(mBuffer);
+        memset(&mBuffer, 0, sizeof(mBuffer));
+        mHaveBuffer = false;
+    }
+
+    status_t err = s->captureScreen(display,cpuConsumer->getBufferQueue(),
+            reqWidth, reqHeight, minLayerZ, maxLayerZ, true);
+
+    if (err == NO_ERROR) {
+        err = mCpuConsumer->lockNextBuffer(&mBuffer);
+        if (err == NO_ERROR) {
+            mHaveBuffer = true;
+        }
+    }
+    return err;
+}
+
+status_t ScreenshotClient::update(const sp<IBinder>& display) {
+    return ScreenshotClient::update(display, 0, 0, 0, -1UL);
+}
+
+status_t ScreenshotClient::update(const sp<IBinder>& display,
+        uint32_t reqWidth, uint32_t reqHeight) {
+    return ScreenshotClient::update(display, reqWidth, reqHeight, 0, -1UL);
 }
 
 void ScreenshotClient::release() {
-    mHeap = 0;
+    if (mHaveBuffer) {
+        mCpuConsumer->unlockBuffer(mBuffer);
+        memset(&mBuffer, 0, sizeof(mBuffer));
+        mHaveBuffer = false;
+    }
+    mCpuConsumer.clear();
 }
 
 void const* ScreenshotClient::getPixels() const {
-    return mHeap->getBase();
+    return mBuffer.data;
 }
 
 uint32_t ScreenshotClient::getWidth() const {
-    return mWidth;
+    return mBuffer.width;
 }
 
 uint32_t ScreenshotClient::getHeight() const {
-    return mHeight;
+    return mBuffer.height;
 }
 
 PixelFormat ScreenshotClient::getFormat() const {
-    return mFormat;
+    return mBuffer.format;
 }
 
 uint32_t ScreenshotClient::getStride() const {
-    return mWidth;
+    return mBuffer.stride;
 }
 
 size_t ScreenshotClient::getSize() const {
-    return mHeap->getSize();
+    return mBuffer.stride * mBuffer.height * bytesPerPixel(mBuffer.format);
 }
 
 // ----------------------------------------------------------------------------

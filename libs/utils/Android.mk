@@ -25,6 +25,8 @@ commonSources:= \
 	Debug.cpp \
 	FileMap.cpp \
 	Flattenable.cpp \
+	JenkinsHash.cpp \
+	LinearAllocator.cpp \
 	LinearTransform.cpp \
 	Log.cpp \
 	PropertyMap.cpp \
@@ -109,6 +111,10 @@ LOCAL_SRC_FILES:= \
 
 ifeq ($(TARGET_OS),linux)
 LOCAL_LDLIBS += -lrt -ldl
+endif
+
+ifeq ($(TARGET_ARCH),mips)
+LOCAL_CFLAGS += -DALIGN_DOUBLE
 endif
 
 LOCAL_C_INCLUDES += \

@@ -37,8 +37,8 @@ struct ANativeWindow;
 namespace android {
 
 class DisplayInfo;
-class FramebufferSurface;
-class LayerBase;
+class DisplaySurface;
+class Layer;
 class SurfaceFlinger;
 class HWComposer;
 
@@ -56,8 +56,13 @@ public:
         DISPLAY_ID_INVALID = -1,
         DISPLAY_PRIMARY     = HWC_DISPLAY_PRIMARY,
         DISPLAY_EXTERNAL    = HWC_DISPLAY_EXTERNAL,
+#ifdef QCOM_HARDWARE
+        DISPLAY_VIRTUAL     = HWC_DISPLAY_VIRTUAL,
+#endif
         NUM_DISPLAY_TYPES   = HWC_NUM_DISPLAY_TYPES,
-        DISPLAY_VIRTUAL     = HWC_NUM_DISPLAY_TYPES
+#ifndef QCOM_HARDWARE
+        DISPLAY_VIRTUAL     = HWC_NUM_DISPLAY_TYPES,
+#endif
     };
 
     enum {
@@ -65,13 +70,17 @@ public:
         SWAP_RECTANGLE  = 0x00080000,
     };
 
+    enum {
+        NO_LAYER_STACK = 0xFFFFFFFF,
+    };
+
     DisplayDevice(
             const sp<SurfaceFlinger>& flinger,
             DisplayType type,
+            int32_t hwcId,  // negative for non-HWC-composited displays
             bool isSecure,
             const wp<IBinder>& displayToken,
-            const sp<ANativeWindow>& nativeWindow,
-            const sp<FramebufferSurface>& framebufferSurface,
+            const sp<DisplaySurface>& displaySurface,
             EGLConfig config);
 
     ~DisplayDevice();
@@ -95,8 +104,8 @@ public:
 
     EGLSurface  getEGLSurface() const;
 
-    void                    setVisibleLayersSortedByZ(const Vector< sp<LayerBase> >& layers);
-    const Vector< sp<LayerBase> >& getVisibleLayersSortedByZ() const;
+    void                    setVisibleLayersSortedByZ(const Vector< sp<Layer> >& layers);
+    const Vector< sp<Layer> >& getVisibleLayersSortedByZ() const;
     bool                    getSecureLayerVisible() const;
     Region                  getDirtyRegion(bool repaintEverything) const;
 
@@ -105,8 +114,9 @@ public:
 
     int                     getOrientation() const { return mOrientation; }
     const Transform&        getTransform() const { return mGlobalTransform; }
-    const Rect&             getViewport() const { return mViewport; }
-    const Rect&             getFrame() const { return mFrame; }
+    const Rect              getViewport() const { return mViewport; }
+    const Rect              getFrame() const { return mFrame; }
+    const Rect&             getScissor() const { return mScissor; }
     bool                    needsFiltering() const { return mNeedsFiltering; }
 
     uint32_t                getLayerStack() const { return mLayerStack; }
@@ -116,7 +126,7 @@ public:
 
     void swapBuffers(HWComposer& hwc) const;
     status_t compositionComplete() const;
-    
+
     // called after h/w composer has completed its set() call
     void onSwapBuffersCompleted(HWComposer& hwc) const;
 
@@ -141,6 +151,9 @@ public:
     bool isScreenAcquired() const;
     bool canDraw() const;
 
+    // release HWC resources (if any) for removable displays
+    void disconnect(HWComposer& hwc);
+
     /* ------------------------------------------------------------------------
      * Debugging
      */
@@ -148,8 +161,6 @@ public:
     void dump(String8& result, char* buffer, size_t SIZE) const;
 
 private:
-    void init(EGLConfig config);
-
     /*
      *  Constants, set during initialization
      */
@@ -160,9 +171,7 @@ private:
 
     // ANativeWindow this display is rendering into
     sp<ANativeWindow> mNativeWindow;
-
-    // set if mNativeWindow is a FramebufferSurface
-    sp<FramebufferSurface> mFramebufferSurface;
+    sp<DisplaySurface> mDisplaySurface;
 
     EGLDisplay      mDisplay;
     EGLSurface      mSurface;
@@ -181,7 +190,7 @@ private:
      */
 
     // list of visible layers on that display
-    Vector< sp<LayerBase> > mVisibleLayersSortedByZ;
+    Vector< sp<Layer> > mVisibleLayersSortedByZ;
 
     // Whether we have a visible secure layer on this display
     bool mSecureLayerVisible;
@@ -196,12 +205,14 @@ private:
     static status_t orientationToTransfrom(int orientation,
             int w, int h, Transform* tr);
 
-    void updateGeometryTransform();
-
     uint32_t mLayerStack;
     int mOrientation;
+    // user-provided visible area of the layer stack
     Rect mViewport;
+    // user-provided rectangle where mViewport gets mapped to
     Rect mFrame;
+    // pre-computed scissor to apply to the display
+    Rect mScissor;
     Transform mGlobalTransform;
     bool mNeedsFiltering;
 };

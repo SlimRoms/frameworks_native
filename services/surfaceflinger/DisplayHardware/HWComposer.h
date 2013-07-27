@@ -22,13 +22,15 @@
 
 #include <hardware/hwcomposer_defs.h>
 
+#include <ui/Fence.h>
+
+#include <utils/BitSet.h>
 #include <utils/Condition.h>
 #include <utils/Mutex.h>
 #include <utils/StrongPointer.h>
 #include <utils/Thread.h>
 #include <utils/Timers.h>
 #include <utils/Vector.h>
-#include <utils/BitSet.h>
 
 extern "C" int clock_nanosleep(clockid_t clock_id, int flags,
                            const struct timespec *request,
@@ -45,7 +47,6 @@ namespace android {
 
 class GraphicBuffer;
 class Fence;
-class LayerBase;
 class Region;
 class String8;
 class SurfaceFlinger;
@@ -62,7 +63,11 @@ public:
     };
 
     enum {
+#ifdef QCOM_HARDWARE
+        MAX_DISPLAYS = HWC_NUM_DISPLAY_TYPES
+#else
         MAX_DISPLAYS = HWC_NUM_DISPLAY_TYPES + 1
+#endif
     };
 
     HWComposer(
@@ -111,9 +116,9 @@ public:
     // does this display have layers handled by GLES
     bool hasGlesComposition(int32_t id) const;
 
-    // get the releaseFence file descriptor for the given display
+    // get the releaseFence file descriptor for a display's framebuffer layer.
     // the release fence is only valid after commit()
-    int getAndResetReleaseFenceFd(int32_t id);
+    sp<Fence> getAndResetReleaseFence(int32_t id);
 
     // needed forward declarations
     class LayerListIterator;
@@ -126,6 +131,17 @@ public:
     int fbPost(int32_t id, const sp<Fence>& acquireFence, const sp<GraphicBuffer>& buf);
     int fbCompositionComplete();
     void fbDump(String8& result);
+
+    // Set the output buffer and acquire fence for a virtual display.
+    // Returns INVALID_OPERATION if id is not a virtual display.
+    status_t setOutputBuffer(int32_t id, const sp<Fence>& acquireFence,
+            const sp<GraphicBuffer>& buf);
+
+    // Get the retire fence for the last committed frame. This fence will
+    // signal when the h/w composer is completely finished with the frame.
+    // For physical displays, it is no longer being displayed. For virtual
+    // displays, writes to the output buffer are complete.
+    sp<Fence> getLastRetireFence(int32_t id);
 
     /*
      * Interface to hardware composer's layers functionality.
@@ -140,8 +156,7 @@ public:
     public:
         virtual int32_t getCompositionType() const = 0;
         virtual uint32_t getHints() const = 0;
-        virtual int getAndResetReleaseFenceFd() = 0;
-        virtual void setPerFrameDefaultState() = 0;
+        virtual sp<Fence> getAndResetReleaseFence() = 0;
         virtual void setDefaultState() = 0;
         virtual void setSkip(bool skip) = 0;
         virtual void setBlending(uint32_t blending) = 0;
@@ -151,6 +166,7 @@ public:
         virtual void setVisibleRegionScreen(const Region& reg) = 0;
         virtual void setBuffer(const sp<GraphicBuffer>& buffer) = 0;
         virtual void setAcquireFenceFd(int fenceFd) = 0;
+        virtual void setPlaneAlpha(uint8_t alpha) = 0;
         virtual void onDisplayed() = 0;
     };
 
@@ -233,12 +249,16 @@ public:
     // HWC_DISPLAY_PRIMARY).
     nsecs_t getRefreshPeriod(int disp) const;
     nsecs_t getRefreshTimestamp(int disp) const;
+    sp<Fence> getDisplayFence(int disp) const;
     uint32_t getWidth(int disp) const;
     uint32_t getHeight(int disp) const;
     uint32_t getFormat(int disp) const;
     float getDpiX(int disp) const;
     float getDpiY(int disp) const;
     bool isConnected(int disp) const;
+
+    status_t setVirtualDisplayProperties(int32_t id, uint32_t w, uint32_t h,
+            uint32_t format);
 
     // this class is only used to fake the VSync event on systems that don't
     // have it.
@@ -263,7 +283,7 @@ public:
 
 private:
     void loadHwcModule();
-    void loadFbHalModule();
+    int loadFbHalModule();
 
     LayerListIterator getLayerIterator(int32_t id, size_t index);
 
@@ -286,13 +306,8 @@ private:
 
 
     struct DisplayData {
-        DisplayData() : xdpi(0), ydpi(0), refresh(0),
-            connected(false), hasFbComp(false), hasOvComp(false),
-            capacity(0), list(NULL),
-            framebufferTarget(NULL), fbTargetHandle(NULL), events(0) { }
-        ~DisplayData() {
-            free(list);
-        }
+        DisplayData();
+        ~DisplayData();
         uint32_t width;
         uint32_t height;
         uint32_t format;    // pixel format from FB hal, for pre-hwc-1.1
@@ -306,6 +321,12 @@ private:
         hwc_display_contents_1* list;
         hwc_layer_1* framebufferTarget;
         buffer_handle_t fbTargetHandle;
+        sp<Fence> lastRetireFence;  // signals when the last set op retires
+        sp<Fence> lastDisplayFence; // signals when the last set op takes
+                                    // effect on screen
+        buffer_handle_t outbufHandle;
+        sp<Fence> outbufAcquireFence;
+
         // protected by mEventControlLock
         int32_t events;
     };

@@ -84,6 +84,20 @@ status_t GraphicBufferMapper::lock(buffer_handle_t handle,
     return err;
 }
 
+status_t GraphicBufferMapper::lockYCbCr(buffer_handle_t handle,
+        int usage, const Rect& bounds, android_ycbcr *ycbcr)
+{
+    ATRACE_CALL();
+    status_t err;
+
+    err = mAllocMod->lock_ycbcr(mAllocMod, handle, usage,
+            bounds.left, bounds.top, bounds.width(), bounds.height(),
+            ycbcr);
+
+    ALOGW_IF(err, "lock(...) failed %d (%s)", err, strerror(-err));
+    return err;
+}
+
 status_t GraphicBufferMapper::unlock(buffer_handle_t handle)
 {
     ATRACE_CALL();
@@ -92,6 +106,18 @@ status_t GraphicBufferMapper::unlock(buffer_handle_t handle)
     err = mAllocMod->unlock(mAllocMod, handle);
 
     ALOGW_IF(err, "unlock(...) failed %d (%s)", err, strerror(-err));
+    return err;
+}
+
+status_t GraphicBufferMapper::perform(buffer_handle_t handle, int operation,
+                           uint32_t w, uint32_t h, uint32_t format)
+{
+    ATRACE_CALL();
+    status_t err;
+
+    err = mAllocMod->perform(mAllocMod, operation, w, h, format, handle);
+
+    ALOGW_IF(err, "perform(...) failed %d (%s)", err, strerror(-err));
     return err;
 }
 
@@ -108,18 +134,5 @@ status_t GraphicBufferMapper::getphys(buffer_handle_t handle, void** paddr)
 }
 #endif
 
-#ifdef QCOM_BSP
-status_t GraphicBufferMapper::perform(buffer_handle_t handle, int operation,
-                                      uint32_t w, uint32_t h, uint32_t format)
-{
-    ATRACE_CALL();
-    status_t err;
-
-    err = mAllocMod->perform(mAllocMod, operation, w, h, format, handle);
-
-    ALOGW_IF(err, "perform(...) failed %d (%s)", err, strerror(-err));
-    return err;
-}
-#endif
 // ---------------------------------------------------------------------------
 }; // namespace android

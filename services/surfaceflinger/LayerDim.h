@@ -23,16 +23,17 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
-#include "LayerBase.h"
+#include "Layer.h"
 
 // ---------------------------------------------------------------------------
 
 namespace android {
 
-class LayerDim : public LayerBaseClient
+class LayerDim : public Layer
 {
 public:    
-                LayerDim(SurfaceFlinger* flinger, const sp<Client>& client);
+                LayerDim(SurfaceFlinger* flinger, const sp<Client>& client,
+                        const String8& name, uint32_t w, uint32_t h, uint32_t flags);
         virtual ~LayerDim();
 
     virtual void onDraw(const sp<const DisplayDevice>& hw, const Region& clip) const;
@@ -41,6 +42,9 @@ public:
     virtual bool isProtectedByApp() const { return false; }
     virtual bool isProtectedByDRM() const { return false; }
     virtual const char* getTypeId() const { return "LayerDim"; }
+
+    virtual bool isFixedSize() const      { return true; }
+    virtual bool isVisible() const;
 };
 
 // ---------------------------------------------------------------------------

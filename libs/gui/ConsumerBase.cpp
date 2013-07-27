@@ -18,7 +18,6 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 //#define LOG_NDEBUG 0
 
-#define GL_GLEXT_PROTOTYPES
 #define EGL_EGLEXT_PROTOTYPES
 
 #include <EGL/egl.h>
@@ -69,7 +68,7 @@ ConsumerBase::ConsumerBase(const sp<BufferQueue>& bufferQueue) :
 
     status_t err = mBufferQueue->consumerConnect(proxy);
     if (err != NO_ERROR) {
-        CB_LOGE("SurfaceTexture: error connecting to BufferQueue: %s (%d)",
+        CB_LOGE("ConsumerBase: error connecting to BufferQueue: %s (%d)",
                 strerror(-err), err);
     } else {
         mBufferQueue->setConsumerName(mName);
@@ -77,14 +76,25 @@ ConsumerBase::ConsumerBase(const sp<BufferQueue>& bufferQueue) :
 }
 
 ConsumerBase::~ConsumerBase() {
-	CB_LOGV("~ConsumerBase");
+    CB_LOGV("~ConsumerBase");
+    Mutex::Autolock lock(mMutex);
+
+    // Verify that abandon() has been called before we get here.  This should
+    // be done by ConsumerBase::onLastStrongRef(), but it's possible for a
+    // derived class to override that method and not call
+    // ConsumerBase::onLastStrongRef().
+    LOG_ALWAYS_FATAL_IF(!mAbandoned, "[%s] ~ConsumerBase was called, but the "
+        "consumer is not abandoned!", mName.string());
+}
+
+void ConsumerBase::onLastStrongRef(const void* id) {
     abandon();
 }
 
 void ConsumerBase::freeBufferLocked(int slotIndex) {
     CB_LOGV("freeBufferLocked: slotIndex=%d", slotIndex);
     mSlots[slotIndex].mGraphicBuffer = 0;
-    mSlots[slotIndex].mFence = 0;
+    mSlots[slotIndex].mFence = Fence::NO_FENCE;
 }
 
 // Used for refactoring, should not be in final interface
@@ -99,7 +109,7 @@ void ConsumerBase::onFrameAvailable() {
     sp<FrameAvailableListener> listener;
     { // scope for the lock
         Mutex::Autolock lock(mMutex);
-        listener = mFrameAvailableListener;
+        listener = mFrameAvailableListener.promote();
     }
 
     if (listener != NULL) {
@@ -148,7 +158,7 @@ void ConsumerBase::abandonLocked() {
 }
 
 void ConsumerBase::setFrameAvailableListener(
-        const sp<FrameAvailableListener>& listener) {
+        const wp<FrameAvailableListener>& listener) {
     CB_LOGV("setFrameAvailableListener");
     Mutex::Autolock lock(mMutex);
     mFrameAvailableListener = listener;
@@ -228,7 +238,7 @@ status_t ConsumerBase::releaseBufferLocked(int slot, EGLDisplay display,
         freeBufferLocked(slot);
     }
 
-    mSlots[slot].mFence.clear();
+    mSlots[slot].mFence = Fence::NO_FENCE;
 
     return err;
 }

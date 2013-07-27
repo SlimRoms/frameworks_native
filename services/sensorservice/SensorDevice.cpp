@@ -144,6 +144,15 @@ ssize_t SensorDevice::poll(sensors_event_t* buffer, size_t count) {
     return c;
 }
 
+status_t SensorDevice::resetStateWithoutActuatingHardware(void *ident, int handle)
+{
+    if (!mSensorDevice) return NO_INIT;
+    Info& info( mActivationCount.editValueFor(handle));
+    Mutex::Autolock _l(mLock);
+    info.rates.removeItem(ident);
+    return NO_ERROR;
+}
+
 status_t SensorDevice::activate(void* ident, int handle, int enabled)
 {
     if (!mSensorDevice) return NO_INIT;
@@ -228,6 +237,12 @@ status_t SensorDevice::setDelay(void* ident, int handle, int64_t ns)
     if (err < 0) return err;
     ns = info.selectDelay();
     return mSensorDevice->setDelay(mSensorDevice, handle, ns);
+}
+
+int SensorDevice::getHalDeviceVersion() const {
+    if (!mSensorDevice) return -1;
+
+    return mSensorDevice->common.version;
 }
 
 // ---------------------------------------------------------------------------

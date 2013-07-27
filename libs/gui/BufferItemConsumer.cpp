@@ -62,8 +62,8 @@ status_t BufferItemConsumer::acquireBuffer(BufferItem *item, bool waitForFence) 
         return err;
     }
 
-    if (waitForFence && item->mFence.get()) {
-        err = item->mFence->waitForever(1000, "BufferItemConsumer::acquireBuffer");
+    if (waitForFence) {
+        err = item->mFence->waitForever("BufferItemConsumer::acquireBuffer");
         if (err != OK) {
             BI_LOGE("Failed to wait for fence of acquired buffer: %s (%d)",
                     strerror(-err), err);
@@ -91,6 +91,16 @@ status_t BufferItemConsumer::releaseBuffer(const BufferItem &item,
                 strerror(-err), err);
     }
     return err;
+}
+
+status_t BufferItemConsumer::setDefaultBufferSize(uint32_t w, uint32_t h) {
+    Mutex::Autolock _l(mMutex);
+    return mBufferQueue->setDefaultBufferSize(w, h);
+}
+
+status_t BufferItemConsumer::setDefaultBufferFormat(uint32_t defaultFormat) {
+    Mutex::Autolock _l(mMutex);
+    return mBufferQueue->setDefaultBufferFormat(defaultFormat);
 }
 
 } // namespace android

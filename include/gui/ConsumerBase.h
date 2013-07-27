@@ -53,7 +53,7 @@ public:
     // abandon frees all the buffers and puts the ConsumerBase into the
     // 'abandoned' state.  Once put in this state the ConsumerBase can never
     // leave it.  When in the 'abandoned' state, all methods of the
-    // ISurfaceTexture interface will fail with the NO_INIT error.
+    // IGraphicBufferProducer interface will fail with the NO_INIT error.
     //
     // Note that while calling this method causes all the buffers to be freed
     // from the perspective of the the ConsumerBase, if there are additional
@@ -69,16 +69,15 @@ public:
     // ConsumerBase is connected.
     sp<BufferQueue> getBufferQueue() const;
 
-    // dump writes the current state to a string.  These methods should NOT be
-    // overridden by child classes.  Instead they should override the
-    // dumpLocked method, which is called by these methods after locking the
-    // mutex.
+    // dump writes the current state to a string. Child classes should add
+    // their state to the dump by overriding the dumpLocked method, which is
+    // called by these methods after locking the mutex.
     void dump(String8& result) const;
     void dump(String8& result, const char* prefix, char* buffer, size_t SIZE) const;
 
     // setFrameAvailableListener sets the listener object that will be notified
     // when a new frame becomes available.
-    void setFrameAvailableListener(const sp<FrameAvailableListener>& listener);
+    void setFrameAvailableListener(const wp<FrameAvailableListener>& listener);
 
 private:
     ConsumerBase(const ConsumerBase&);
@@ -89,6 +88,18 @@ protected:
     // ConsumerBase constructs a new ConsumerBase object to consume image
     // buffers from the given BufferQueue.
     ConsumerBase(const sp<BufferQueue> &bufferQueue);
+
+    // onLastStrongRef gets called by RefBase just before the dtor of the most
+    // derived class.  It is used to clean up the buffers so that ConsumerBase
+    // can coordinate the clean-up by calling into virtual methods implemented
+    // by the derived classes.  This would not be possible from the
+    // ConsuemrBase dtor because by the time that gets called the derived
+    // classes have already been destructed.
+    //
+    // This methods should not need to be overridden by derived classes, but
+    // if they are overridden the ConsumerBase implementation must be called
+    // from the derived class.
+    virtual void onLastStrongRef(const void* id);
 
     // Implementation of the BufferQueue::ConsumerListener interface.  These
     // calls are used to notify the ConsumerBase of asynchronous events in the
@@ -186,7 +197,7 @@ protected:
     Slot mSlots[BufferQueue::NUM_BUFFER_SLOTS];
 
     // mAbandoned indicates that the BufferQueue will no longer be used to
-    // consume images buffers pushed to it using the ISurfaceTexture
+    // consume images buffers pushed to it using the IGraphicBufferProducer
     // interface. It is initialized to false, and set to true in the abandon
     // method.  A BufferQueue that has been abandoned will return the NO_INIT
     // error from all IConsumerBase methods capable of returning an error.
@@ -199,7 +210,7 @@ protected:
     // mFrameAvailableListener is the listener object that will be called when a
     // new frame becomes available. If it is not NULL it will be called from
     // queueBuffer.
-    sp<FrameAvailableListener> mFrameAvailableListener;
+    wp<FrameAvailableListener> mFrameAvailableListener;
 
     // The ConsumerBase has-a BufferQueue and is responsible for creating this object
     // if none is supplied

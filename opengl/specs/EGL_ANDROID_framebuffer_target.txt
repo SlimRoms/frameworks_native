@@ -16,7 +16,7 @@ Contact
 
 Status
 
-    Draft.
+    Complete
 
 Version
 
@@ -24,7 +24,7 @@ Version
 
 Number
 
-    EGL Extension #XXX
+    EGL Extension #47
 
 Dependencies
 

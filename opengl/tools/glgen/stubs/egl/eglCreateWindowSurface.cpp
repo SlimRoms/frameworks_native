@@ -34,7 +34,7 @@ not_valid_surface:
         goto exit;
     }
 
-    window = android::android_Surface_getNativeWindow(_env, win);
+    window = android::android_view_Surface_getNativeWindow(_env, win);
 
     if (window == NULL)
         goto not_valid_surface;
@@ -90,7 +90,7 @@ android_eglCreateWindowSurfaceTexture
     jint _remaining;
     EGLint *attrib_list = (EGLint *) 0;
     android::sp<ANativeWindow> window;
-    android::sp<android::SurfaceTexture> surfaceTexture;
+    android::sp<android::GLConsumer> glConsumer;
 
     if (!attrib_list_ref) {
         _exception = 1;
@@ -111,8 +111,12 @@ not_valid_surface:
         _exceptionMessage = "Make sure the SurfaceView or associated SurfaceHolder has a valid Surface";
         goto exit;
     }
-    surfaceTexture = android::SurfaceTexture_getSurfaceTexture(_env, win);
-    window = new android::SurfaceTextureClient(surfaceTexture);
+    glConsumer = android::SurfaceTexture_getSurfaceTexture(_env, win);
+
+    if (glConsumer == NULL)
+        goto not_valid_surface;
+
+    window = new android::Surface(glConsumer->getBufferQueue());
 
     if (window == NULL)
         goto not_valid_surface;

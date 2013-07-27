@@ -54,8 +54,6 @@
 EGLBoolean EGLAPI eglSetSwapRectangleANDROID(EGLDisplay dpy, EGLSurface draw,
         EGLint left, EGLint top, EGLint width, EGLint height);
 
-EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw);
-
 // ----------------------------------------------------------------------------
 namespace android {
 
@@ -149,6 +147,7 @@ struct egl_surface_t
     EGLDisplay          dpy;
     EGLConfig           config;
     EGLContext          ctx;
+    bool                zombie;
 
                 egl_surface_t(EGLDisplay dpy, EGLConfig config, int32_t depthFormat);
     virtual     ~egl_surface_t();
@@ -168,7 +167,6 @@ struct egl_surface_t
     virtual     EGLint      getSwapBehavior() const;
     virtual     EGLBoolean  swapBuffers();
     virtual     EGLBoolean  setSwapRectangle(EGLint l, EGLint t, EGLint w, EGLint h);
-    virtual     EGLClientBuffer getRenderBuffer() const;
 protected:
     GGLSurface              depth;
 };
@@ -176,7 +174,7 @@ protected:
 egl_surface_t::egl_surface_t(EGLDisplay dpy,
         EGLConfig config,
         int32_t depthFormat)
-    : magic(MAGIC), dpy(dpy), config(config), ctx(0)
+    : magic(MAGIC), dpy(dpy), config(config), ctx(0), zombie(false)
 {
     depth.version = sizeof(GGLSurface);
     depth.data = 0;
@@ -213,10 +211,6 @@ EGLBoolean egl_surface_t::setSwapRectangle(
     return EGL_FALSE;
 }
 
-EGLClientBuffer egl_surface_t::getRenderBuffer() const {
-    return 0;
-}
-
 // ----------------------------------------------------------------------------
 
 struct egl_window_surface_v2_t : public egl_surface_t
@@ -241,7 +235,6 @@ struct egl_window_surface_v2_t : public egl_surface_t
     virtual     EGLint      getRefreshRate() const;
     virtual     EGLint      getSwapBehavior() const;
     virtual     EGLBoolean  setSwapRectangle(EGLint l, EGLint t, EGLint w, EGLint h);
-    virtual     EGLClientBuffer  getRenderBuffer() const;
     
 private:
     status_t lock(ANativeWindowBuffer* buf, int usage, void** vaddr);
@@ -427,9 +420,8 @@ void egl_window_surface_v2_t::disconnect()
         bits = NULL;
         unlock(buffer);
     }
-    // enqueue the last frame
-    nativeWindow->queueBuffer(nativeWindow, buffer, -1);
     if (buffer) {
+        nativeWindow->cancelBuffer(nativeWindow, buffer, -1);
         buffer->common.decRef(&buffer->common);
         buffer = 0;
     }
@@ -587,11 +579,6 @@ EGLBoolean egl_window_surface_v2_t::setSwapRectangle(
 {
     dirtyRegion = Rect(l, t, l+w, t+h);
     return EGL_TRUE;
-}
-
-EGLClientBuffer egl_window_surface_v2_t::getRenderBuffer() const
-{
-    return buffer;
 }
 
 EGLBoolean egl_window_surface_v2_t::bindDrawSurface(ogles_context_t* gl)
@@ -824,7 +811,6 @@ static char const * const gExtensionsString =
         // "KHR_image_pixmap "
         "EGL_ANDROID_image_native_buffer "
         "EGL_ANDROID_swap_rectangle "
-        "EGL_ANDROID_get_render_buffer "
         ;
 
 // ----------------------------------------------------------------------------
@@ -885,8 +871,6 @@ static const extention_map_t gExtentionMap[] = {
             (__eglMustCastToProperFunctionPointerType)&eglGetSyncAttribKHR },
     { "eglSetSwapRectangleANDROID", 
             (__eglMustCastToProperFunctionPointerType)&eglSetSwapRectangleANDROID }, 
-    { "eglGetRenderBufferANDROID",
-            (__eglMustCastToProperFunctionPointerType)&eglGetRenderBufferANDROID },
 };
 
 /*
@@ -1596,11 +1580,12 @@ EGLBoolean eglDestroySurface(EGLDisplay dpy, EGLSurface eglSurface)
         if (surface->dpy != dpy)
             return setError(EGL_BAD_DISPLAY, EGL_FALSE);
         if (surface->ctx) {
-            // FIXME: this surface is current check what the spec says
+            // defer disconnect/delete until no longer current
+            surface->zombie = true;
+        } else {
             surface->disconnect();
-            surface->ctx = 0;
+            delete surface;
         }
-        delete surface;
     }
     return EGL_TRUE;
 }
@@ -1752,6 +1737,9 @@ EGLBoolean eglMakeCurrent(  EGLDisplay dpy, EGLSurface draw,
             if (c->draw) {
                 egl_surface_t* s = reinterpret_cast<egl_surface_t*>(c->draw);
                 s->disconnect();
+                s->ctx = EGL_NO_CONTEXT;
+                if (s->zombie)
+                    delete s;
             }
             if (c->read) {
                 // FIXME: unlock/disconnect the read surface too 
@@ -1793,8 +1781,10 @@ EGLBoolean eglMakeCurrent(  EGLDisplay dpy, EGLSurface draw,
                 egl_surface_t* r = (egl_surface_t*)c->read;
                 if (d) {
                     c->draw = 0;
-                    d->ctx = EGL_NO_CONTEXT;
                     d->disconnect();
+                    d->ctx = EGL_NO_CONTEXT;
+                    if (d->zombie)
+                        delete d;
                 }
                 if (r) {
                     c->read = 0;
@@ -2180,19 +2170,3 @@ EGLBoolean eglSetSwapRectangleANDROID(EGLDisplay dpy, EGLSurface draw,
 
     return EGL_TRUE;
 }
-
-EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
-{
-    if (egl_display_t::is_valid(dpy) == EGL_FALSE)
-        return setError(EGL_BAD_DISPLAY, (EGLClientBuffer)0);
-
-    egl_surface_t* d = static_cast<egl_surface_t*>(draw);
-    if (!d->isValid())
-        return setError(EGL_BAD_SURFACE, (EGLClientBuffer)0);
-    if (d->dpy != dpy)
-        return setError(EGL_BAD_DISPLAY, (EGLClientBuffer)0);
-
-    // post the surface
-    return d->getRenderBuffer();
-}
-

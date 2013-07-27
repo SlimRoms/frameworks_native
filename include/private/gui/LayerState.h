@@ -24,7 +24,6 @@
 
 #include <ui/Region.h>
 #include <ui/Rect.h>
-#include <gui/ISurface.h>
 
 namespace android {
 
@@ -51,7 +50,7 @@ struct layer_state_t {
     };
 
     layer_state_t()
-        :   surface(0), what(0),
+        :   what(0),
             x(0), y(0), z(0), w(0), h(0), layerStack(0),
             alpha(0), flags(0), mask(0),
             reserved(0)
@@ -70,7 +69,7 @@ struct layer_state_t {
                 float   dsdy;
                 float   dtdy;
             };
-            SurfaceID       surface;
+            sp<IBinder>     surface;
             uint32_t        what;
             float           x;
             float           y;
@@ -114,7 +113,7 @@ struct DisplayState {
 
     uint32_t what;
     sp<IBinder> token;
-    sp<ISurfaceTexture> surface;
+    sp<IGraphicBufferProducer> surface;
     uint32_t layerStack;
     uint32_t orientation;
     Rect viewport;

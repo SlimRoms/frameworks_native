@@ -27,10 +27,10 @@
 
 #include <ui/PixelFormat.h>
 
-#include <gui/ISurface.h>
-
 namespace android {
 // ----------------------------------------------------------------------------
+
+class IGraphicBufferProducer;
 
 class ISurfaceComposerClient : public IInterface
 {
@@ -48,30 +48,23 @@ public:
         eProtectedByDRM     = 0x00001000,
 
         eFXSurfaceNormal    = 0x00000000,
-        eFXSurfaceBlur      = 0x00010000, // deprecated, same as Dim
         eFXSurfaceDim       = 0x00020000,
-        eFXSurfaceScreenshot= 0x00030000,
         eFXSurfaceMask      = 0x000F0000,
     };
 
-    struct surface_data_t {
-        int32_t token;
-        int32_t identity;
-        status_t readFromParcel(const Parcel& parcel);
-        status_t writeToParcel(Parcel* parcel) const;
-    };
-
     /*
      * Requires ACCESS_SURFACE_FLINGER permission
      */
-    virtual sp<ISurface> createSurface(surface_data_t* data,
+    virtual status_t createSurface(
             const String8& name, uint32_t w, uint32_t h,
-            PixelFormat format, uint32_t flags) = 0;
+            PixelFormat format, uint32_t flags,
+            sp<IBinder>* handle,
+            sp<IGraphicBufferProducer>* gbp) = 0;
 
     /*
      * Requires ACCESS_SURFACE_FLINGER permission
      */
-    virtual status_t destroySurface(SurfaceID sid) = 0;
+    virtual status_t destroySurface(const sp<IBinder>& handle) = 0;
 };
 
 // ----------------------------------------------------------------------------

@@ -38,6 +38,7 @@
 #include <gui/SensorEventQueue.h>
 
 #include <hardware/sensors.h>
+#include <hardware_legacy/power.h>
 
 #include "BatteryService.h"
 #include "CorrectedGyroSensor.h"
@@ -66,6 +67,8 @@ namespace android {
  * - gravity sensor length is wrong (=> drift in linear-acc sensor)
  *
  */
+
+const char* SensorService::WAKE_LOCK_NAME = "SensorService";
 
 SensorService::SensorService()
     : mInitCheck(NO_INIT)
@@ -258,6 +261,26 @@ status_t SensorService::dump(int fd, const Vector<String16>& args)
     return NO_ERROR;
 }
 
+void SensorService::cleanupAutoDisabledSensor(const sp<SensorEventConnection>& connection,
+        sensors_event_t const* buffer, const int count) {
+    SensorInterface* sensor;
+    status_t err = NO_ERROR;
+    for (int i=0 ; i<count ; i++) {
+        int handle = buffer[i].sensor;
+        if (getSensorType(handle) == SENSOR_TYPE_SIGNIFICANT_MOTION) {
+            if (connection->hasSensor(handle)) {
+                sensor = mSensorMap.valueFor(handle);
+                err = sensor ?sensor->resetStateWithoutActuatingHardware(connection.get(), handle)
+                        : status_t(BAD_VALUE);
+                if (err != NO_ERROR) {
+                    ALOGE("Sensor Inteface: Resetting state failed with err: %d", err);
+                }
+                cleanupWithoutDisable(connection, handle);
+            }
+        }
+    }
+}
+
 bool SensorService::threadLoop()
 {
     ALOGD("nuSensorService thread starting...");
@@ -270,11 +293,24 @@ bool SensorService::threadLoop()
     const size_t vcount = mVirtualSensorList.size();
 
     ssize_t count;
+    bool wakeLockAcquired = false;
+    const int halVersion = device.getHalDeviceVersion();
     do {
         count = device.poll(buffer, numEventMax);
         if (count<0) {
             ALOGE("sensor poll failed (%s)", strerror(-count));
             break;
+        }
+
+        // Poll has returned. Hold a wakelock.
+        // Todo(): add a flag to the sensors definitions to indicate
+        // the sensors which can wake up the AP
+        for (int i = 0; i < count; i++) {
+            if (getSensorType(buffer[i].sensor) == SENSOR_TYPE_SIGNIFICANT_MOTION) {
+                 acquire_wake_lock(PARTIAL_WAKE_LOCK, WAKE_LOCK_NAME);
+                 wakeLockAcquired = true;
+                 break;
+            }
         }
 
         recordLastValue(buffer, count);
@@ -325,6 +361,17 @@ bool SensorService::threadLoop()
             }
         }
 
+        // handle backward compatibility for RotationVector sensor
+        if (halVersion < SENSORS_DEVICE_API_VERSION_1_0) {
+            for (int i = 0; i < count; i++) {
+                if (getSensorType(buffer[i].sensor) == SENSOR_TYPE_ROTATION_VECTOR) {
+                    // All the 4 components of the quaternion should be available
+                    // No heading accuracy. Set it to -1
+                    buffer[i].data[4] = -1;
+                }
+            }
+        }
+
         // send our events to clients...
         const SortedVector< wp<SensorEventConnection> > activeConnections(
                 getActiveConnections());
@@ -334,8 +381,14 @@ bool SensorService::threadLoop()
                     activeConnections[i].promote());
             if (connection != 0) {
                 connection->sendEvents(buffer, count, scratch);
+                // Some sensors need to be auto disabled after the trigger
+                cleanupAutoDisabledSensor(connection, buffer, count);
             }
         }
+
+        // We have read the data, upper layers should hold the wakelock.
+        if (wakeLockAcquired) release_wake_lock(WAKE_LOCK_NAME);
+
     } while (count >= 0 || Thread::exitPending());
 
     ALOGW("Exiting SensorService::threadLoop => aborting...");
@@ -399,6 +452,18 @@ String8 SensorService::getSensorName(int handle) const {
     return result;
 }
 
+int SensorService::getSensorType(int handle) const {
+    size_t count = mUserSensorList.size();
+    for (size_t i=0 ; i<count ; i++) {
+        const Sensor& sensor(mUserSensorList[i]);
+        if (sensor.getHandle() == handle) {
+            return sensor.getType();
+        }
+    }
+    return -1;
+}
+
+
 Vector<Sensor> SensorService::getSensorList()
 {
     char value[PROPERTY_VALUE_MAX];
@@ -460,44 +525,51 @@ status_t SensorService::enable(const sp<SensorEventConnection>& connection,
 
     Mutex::Autolock _l(mLock);
     SensorInterface* sensor = mSensorMap.valueFor(handle);
+    SensorRecord* rec = mActiveSensors.valueFor(handle);
+    if (rec == 0) {
+        rec = new SensorRecord(connection);
+        mActiveSensors.add(handle, rec);
+        if (sensor->isVirtual()) {
+            mActiveVirtualSensors.add(handle, sensor);
+        }
+    } else {
+        if (rec->addConnection(connection)) {
+            // this sensor is already activated, but we are adding a
+            // connection that uses it. Immediately send down the last
+            // known value of the requested sensor if it's not a
+            // "continuous" sensor.
+            if (sensor->getSensor().getMinDelay() == 0) {
+                sensors_event_t scratch;
+                sensors_event_t& event(mLastEventSeen.editValueFor(handle));
+                if (event.version == sizeof(sensors_event_t)) {
+                    connection->sendEvents(&event, 1);
+                }
+            }
+        }
+    }
+
+    if (connection->addSensor(handle)) {
+        BatteryService::enableSensor(connection->getUid(), handle);
+        // the sensor was added (which means it wasn't already there)
+        // so, see if this connection becomes active
+        if (mActiveConnections.indexOf(connection) < 0) {
+            mActiveConnections.add(connection);
+        }
+    } else {
+        ALOGW("sensor %08x already enabled in connection %p (ignoring)",
+            handle, connection.get());
+    }
+
+
+    // we are setup, now enable the sensor.
     status_t err = sensor ? sensor->activate(connection.get(), true) : status_t(BAD_VALUE);
-    if (err == NO_ERROR) {
-        SensorRecord* rec = mActiveSensors.valueFor(handle);
-        if (rec == 0) {
-            rec = new SensorRecord(connection);
-            mActiveSensors.add(handle, rec);
-            if (sensor->isVirtual()) {
-                mActiveVirtualSensors.add(handle, sensor);
-            }
-        } else {
-            if (rec->addConnection(connection)) {
-                // this sensor is already activated, but we are adding a
-                // connection that uses it. Immediately send down the last
-                // known value of the requested sensor if it's not a
-                // "continuous" sensor.
-                if (sensor->getSensor().getMinDelay() == 0) {
-                    sensors_event_t scratch;
-                    sensors_event_t& event(mLastEventSeen.editValueFor(handle));
-                    if (event.version == sizeof(sensors_event_t)) {
-                        connection->sendEvents(&event, 1);
-                    }
-                }
-            }
-        }
-        if (err == NO_ERROR) {
-            // connection now active
-            if (connection->addSensor(handle)) {
-                BatteryService::enableSensor(connection->getUid(), handle);
-                // the sensor was added (which means it wasn't already there)
-                // so, see if this connection becomes active
-                if (mActiveConnections.indexOf(connection) < 0) {
-                    mActiveConnections.add(connection);
-                }
-            } else {
-                ALOGW("sensor %08x already enabled in connection %p (ignoring)",
-                        handle, connection.get());
-            }
-        }
+
+    if (err != NO_ERROR) {
+        // enable has failed, reset state in SensorDevice.
+        status_t resetErr = sensor ? sensor->resetStateWithoutActuatingHardware(connection.get(),
+                handle) : status_t(BAD_VALUE);
+        // enable has failed, reset our state.
+        cleanupWithoutDisable(connection, handle);
     }
     return err;
 }
@@ -507,9 +579,17 @@ status_t SensorService::disable(const sp<SensorEventConnection>& connection,
 {
     if (mInitCheck != NO_ERROR)
         return mInitCheck;
-
-    status_t err = NO_ERROR;
     Mutex::Autolock _l(mLock);
+    status_t err = cleanupWithoutDisable(connection, handle);
+    if (err == NO_ERROR) {
+        SensorInterface* sensor = mSensorMap.valueFor(handle);
+        err = sensor ? sensor->activate(connection.get(), false) : status_t(BAD_VALUE);
+    }
+    return err;
+}
+
+status_t SensorService::cleanupWithoutDisable(const sp<SensorEventConnection>& connection,
+        int handle) {
     SensorRecord* rec = mActiveSensors.valueFor(handle);
     if (rec) {
         // see if this connection becomes inactive
@@ -525,10 +605,9 @@ status_t SensorService::disable(const sp<SensorEventConnection>& connection,
             mActiveVirtualSensors.removeItem(handle);
             delete rec;
         }
-        SensorInterface* sensor = mSensorMap.valueFor(handle);
-        err = sensor ? sensor->activate(connection.get(), false) : status_t(BAD_VALUE);
+        return NO_ERROR;
     }
-    return err;
+    return BAD_VALUE;
 }
 
 status_t SensorService::setEventRate(const sp<SensorEventConnection>& connection,

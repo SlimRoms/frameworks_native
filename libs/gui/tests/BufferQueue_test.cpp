@@ -63,28 +63,28 @@ struct DummyConsumer : public BufferQueue::ConsumerListener {
 TEST_F(BufferQueueTest, AcquireBuffer_ExceedsMaxAcquireCount_Fails) {
     sp<DummyConsumer> dc(new DummyConsumer);
     mBQ->consumerConnect(dc);
-    ISurfaceTexture::QueueBufferOutput qbo;
+    IGraphicBufferProducer::QueueBufferOutput qbo;
     mBQ->connect(NATIVE_WINDOW_API_CPU, &qbo);
     mBQ->setBufferCount(4);
 
     int slot;
     sp<Fence> fence;
     sp<GraphicBuffer> buf;
-    ISurfaceTexture::QueueBufferInput qbi(0, Rect(0, 0, 1, 1),
-            NATIVE_WINDOW_SCALING_MODE_FREEZE, 0, fence);
+    IGraphicBufferProducer::QueueBufferInput qbi(0, Rect(0, 0, 1, 1),
+            NATIVE_WINDOW_SCALING_MODE_FREEZE, 0, Fence::NO_FENCE);
     BufferQueue::BufferItem item;
 
     for (int i = 0; i < 2; i++) {
-        ASSERT_EQ(ISurfaceTexture::BUFFER_NEEDS_REALLOCATION,
-                mBQ->dequeueBuffer(&slot, fence, 1, 1, 0,
+        ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
+                mBQ->dequeueBuffer(&slot, &fence, 1, 1, 0,
                     GRALLOC_USAGE_SW_READ_OFTEN));
         ASSERT_EQ(OK, mBQ->requestBuffer(slot, &buf));
         ASSERT_EQ(OK, mBQ->queueBuffer(slot, qbi, &qbo));
         ASSERT_EQ(OK, mBQ->acquireBuffer(&item));
     }
 
-    ASSERT_EQ(ISurfaceTexture::BUFFER_NEEDS_REALLOCATION,
-            mBQ->dequeueBuffer(&slot, fence, 1, 1, 0,
+    ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
+            mBQ->dequeueBuffer(&slot, &fence, 1, 1, 0,
                 GRALLOC_USAGE_SW_READ_OFTEN));
     ASSERT_EQ(OK, mBQ->requestBuffer(slot, &buf));
     ASSERT_EQ(OK, mBQ->queueBuffer(slot, qbi, &qbo));

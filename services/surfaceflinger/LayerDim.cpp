@@ -33,13 +33,12 @@
 namespace android {
 // ---------------------------------------------------------------------------
 
-LayerDim::LayerDim(SurfaceFlinger* flinger, const sp<Client>& client)
-    : LayerBaseClient(flinger, client)
-{
+LayerDim::LayerDim(SurfaceFlinger* flinger, const sp<Client>& client,
+        const String8& name, uint32_t w, uint32_t h, uint32_t flags)
+    : Layer(flinger, client, name, w, h, flags) {
 }
 
-LayerDim::~LayerDim()
-{
+LayerDim::~LayerDim() {
 }
 
 void LayerDim::onDraw(const sp<const DisplayDevice>& hw, const Region& clip) const
@@ -70,6 +69,12 @@ void LayerDim::onDraw(const sp<const DisplayDevice>& hw, const Region& clip) con
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     }
 }
+
+bool LayerDim::isVisible() const {
+    const Layer::State& s(drawingState());
+    return !(s.flags & layer_state_t::eLayerHidden) && s.alpha;
+}
+
 
 // ---------------------------------------------------------------------------
 

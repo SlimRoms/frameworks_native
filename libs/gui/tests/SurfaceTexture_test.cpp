@@ -18,8 +18,7 @@
 //#define LOG_NDEBUG 0
 
 #include <gtest/gtest.h>
-#include <gui/SurfaceTexture.h>
-#include <gui/SurfaceTextureClient.h>
+#include <gui/GLConsumer.h>
 #include <ui/GraphicBuffer.h>
 #include <utils/String8.h>
 #include <utils/threads.h>
@@ -30,10 +29,14 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <GLES/gl.h>
+#include <GLES/glext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
 #include <ui/FramebufferNativeWindow.h>
+#include <utils/UniquePtr.h>
+#include <android/native_window.h>
 
 namespace android {
 
@@ -202,7 +205,6 @@ protected:
             while ((err = glGetError()) != GL_NO_ERROR) {
                 msg += String8::format(", %#x", err);
             }
-            fprintf(stderr, "pixel check failure: %s\n", msg.string());
             return ::testing::AssertionFailure(
                     ::testing::Message(msg.string()));
         }
@@ -228,7 +230,6 @@ protected:
             msg += String8::format("a(%d isn't %d)", pixel[3], a);
         }
         if (!msg.isEmpty()) {
-            fprintf(stderr, "pixel check failure: %s\n", msg.string());
             return ::testing::AssertionFailure(
                     ::testing::Message(msg.string()));
         } else {
@@ -378,14 +379,108 @@ static int abs(int value) {
 
 // XXX: Code above this point should live elsewhere
 
+class MultiTextureConsumerTest : public GLTest {
+protected:
+    enum { TEX_ID = 123 };
+
+    virtual void SetUp() {
+        GLTest::SetUp();
+        mGlConsumer = new GLConsumer(TEX_ID);
+        mSurface = new Surface(mGlConsumer->getBufferQueue());
+        mANW = mSurface.get();
+
+    }
+    virtual void TearDown() {
+        GLTest::TearDown();
+    }
+    virtual EGLint const* getContextAttribs() {
+        return NULL;
+    }
+    virtual EGLint const* getConfigAttribs() {
+        static EGLint sDefaultConfigAttribs[] = {
+            EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+            EGL_RED_SIZE, 8,
+            EGL_GREEN_SIZE, 8,
+            EGL_BLUE_SIZE, 8,
+            EGL_ALPHA_SIZE, 8,
+            EGL_NONE };
+
+        return sDefaultConfigAttribs;
+    }
+    sp<GLConsumer> mGlConsumer;
+    sp<Surface> mSurface;
+    ANativeWindow* mANW;
+};
+
+
+TEST_F(MultiTextureConsumerTest, EGLImageTargetWorks) {
+    ANativeWindow_Buffer buffer;
+
+    ASSERT_EQ(native_window_set_usage(mANW, GRALLOC_USAGE_SW_WRITE_OFTEN), NO_ERROR);
+    ASSERT_EQ(native_window_set_buffers_format(mANW, HAL_PIXEL_FORMAT_RGBA_8888), NO_ERROR);
+
+    glShadeModel(GL_FLAT);
+    glDisable(GL_DITHER);
+    glDisable(GL_CULL_FACE);
+    glViewport(0, 0, getSurfaceWidth(), getSurfaceHeight());
+    glOrthof(0, getSurfaceWidth(), 0, getSurfaceHeight(), 0, 1);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glColor4f(1, 1, 1, 1);
+
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, TEX_ID);
+    glTexParameterx(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameterx(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameterx(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameterx(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+    uint32_t texel = 0x80808080;
+    glBindTexture(GL_TEXTURE_2D, TEX_ID+1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &texel);
+    glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, TEX_ID+1);
+    glEnable(GL_TEXTURE_2D);
+    glTexEnvx(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, TEX_ID);
+    glEnable(GL_TEXTURE_EXTERNAL_OES);
+    glTexEnvx(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+    glClear(GL_COLOR_BUFFER_BIT);
+    for (int i=0 ; i<8 ; i++) {
+        mSurface->lock(&buffer, NULL);
+        memset(buffer.bits, (i&7) * 0x20, buffer.stride * buffer.height * 4);
+        mSurface->unlockAndPost();
+
+        mGlConsumer->updateTexImage();
+
+        GLfloat vertices[][2] = { {i*16.0f, 0}, {(i+1)*16.0f, 0}, {(i+1)*16.0f, 16.0f}, {i*16.0f, 16.0f} };
+        glVertexPointer(2, GL_FLOAT, 0, vertices);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+        ASSERT_EQ(GLenum(GL_NO_ERROR), glGetError());
+    }
+
+    for (int i=0 ; i<8 ; i++) {
+        EXPECT_TRUE(checkPixel(i*16 + 8,  8, i*16, i*16, i*16, i*16, 0));
+    }
+}
+
+
+
 class SurfaceTextureGLTest : public GLTest {
 protected:
     enum { TEX_ID = 123 };
 
     virtual void SetUp() {
         GLTest::SetUp();
-        mST = new SurfaceTexture(TEX_ID);
-        mSTC = new SurfaceTextureClient(mST);
+        mST = new GLConsumer(TEX_ID);
+        mSTC = new Surface(mST->getBufferQueue());
         mANW = mSTC;
         mTextureRenderer = new TextureRenderer(TEX_ID, mST);
         ASSERT_NO_FATAL_FAILURE(mTextureRenderer->SetUp());
@@ -406,7 +501,7 @@ protected:
 
     class TextureRenderer: public RefBase {
     public:
-        TextureRenderer(GLuint texName, const sp<SurfaceTexture>& st):
+        TextureRenderer(GLuint texName, const sp<GLConsumer>& st):
                 mTexName(texName),
                 mST(st) {
         }
@@ -447,7 +542,7 @@ protected:
             ASSERT_NE(-1, mTexMatrixHandle);
         }
 
-        // drawTexture draws the SurfaceTexture over the entire GL viewport.
+        // drawTexture draws the GLConsumer over the entire GL viewport.
         void drawTexture() {
             static const GLfloat triangleVertices[] = {
                 -1.0f, 1.0f,
@@ -494,14 +589,14 @@ protected:
         }
 
         GLuint mTexName;
-        sp<SurfaceTexture> mST;
+        sp<GLConsumer> mST;
         GLuint mPgm;
         GLint mPositionHandle;
         GLint mTexSamplerHandle;
         GLint mTexMatrixHandle;
     };
 
-    class FrameWaiter : public SurfaceTexture::FrameAvailableListener {
+    class FrameWaiter : public GLConsumer::FrameAvailableListener {
     public:
         FrameWaiter():
                 mPendingFrames(0) {
@@ -526,7 +621,7 @@ protected:
         Condition mCondition;
     };
 
-    // Note that SurfaceTexture will lose the notifications
+    // Note that GLConsumer will lose the notifications
     // onBuffersReleased and onFrameAvailable as there is currently
     // no way to forward the events.  This DisconnectWaiter will not let the
     // disconnect finish until finishDisconnect() is called.  It will
@@ -575,8 +670,8 @@ protected:
         Condition mFrameCondition;
     };
 
-    sp<SurfaceTexture> mST;
-    sp<SurfaceTextureClient> mSTC;
+    sp<GLConsumer> mST;
+    sp<Surface> mSTC;
     sp<ANativeWindow> mANW;
     sp<TextureRenderer> mTextureRenderer;
     sp<FrameWaiter> mFW;
@@ -719,18 +814,18 @@ TEST_F(SurfaceTextureGLTest, TexturingFromCpuFilledYV12BufferNpot) {
     glViewport(0, 0, texWidth, texHeight);
     drawTexture();
 
-    EXPECT_TRUE(checkPixel( 0,  0, 255, 127, 255, 255));
-    EXPECT_TRUE(checkPixel(63,  0,   0, 133,   0, 255));
-    EXPECT_TRUE(checkPixel(63, 65,   0, 133,   0, 255));
-    EXPECT_TRUE(checkPixel( 0, 65, 255, 127, 255, 255));
+    EXPECT_TRUE(checkPixel( 0,  0, 255, 127, 255, 255, 3));
+    EXPECT_TRUE(checkPixel(63,  0,   0, 133,   0, 255, 3));
+    EXPECT_TRUE(checkPixel(63, 65,   0, 133,   0, 255, 3));
+    EXPECT_TRUE(checkPixel( 0, 65, 255, 127, 255, 255, 3));
 
-    EXPECT_TRUE(checkPixel(22, 44, 255, 127, 255, 255));
-    EXPECT_TRUE(checkPixel(45, 52, 255, 127, 255, 255));
-    EXPECT_TRUE(checkPixel(52, 51,  98, 255,  73, 255));
-    EXPECT_TRUE(checkPixel( 7, 31, 155,   0, 118, 255));
-    EXPECT_TRUE(checkPixel(31,  9, 107,  24,  87, 255));
-    EXPECT_TRUE(checkPixel(29, 35, 255, 127, 255, 255));
-    EXPECT_TRUE(checkPixel(36, 22, 155,  29,   0, 255));
+    EXPECT_TRUE(checkPixel(22, 44, 255, 127, 255, 255, 3));
+    EXPECT_TRUE(checkPixel(45, 52, 255, 127, 255, 255, 3));
+    EXPECT_TRUE(checkPixel(52, 51,  98, 255,  73, 255, 3));
+    EXPECT_TRUE(checkPixel( 7, 31, 155,   0, 118, 255, 3));
+    EXPECT_TRUE(checkPixel(31,  9, 107,  24,  87, 255, 3));
+    EXPECT_TRUE(checkPixel(29, 35, 255, 127, 255, 255, 3));
+    EXPECT_TRUE(checkPixel(36, 22, 155,  29,   0, 255, 3));
 }
 
 TEST_F(SurfaceTextureGLTest, TexturingFromCpuFilledYV12BufferPow2) {
@@ -1070,7 +1165,7 @@ TEST_F(SurfaceTextureGLTest, TexturingFromCpuFilledRGBABufferPow2) {
     EXPECT_TRUE(checkPixel( 3, 52,  35, 231,  35,  35));
 }
 
-// Tests if SurfaceTexture and BufferQueue are robust enough
+// Tests if GLConsumer and BufferQueue are robust enough
 // to handle a special case where updateTexImage is called
 // in the middle of disconnect.  This ordering is enforced
 // by blocking in the disconnect callback.
@@ -1123,12 +1218,12 @@ TEST_F(SurfaceTextureGLTest, DisconnectStressTest) {
     sp<Thread> pt(new ProducerThread(mANW));
     pt->run();
 
-    // eat a frame so SurfaceTexture will own an at least one slot
+    // eat a frame so GLConsumer will own an at least one slot
     dw->waitForFrame();
     EXPECT_EQ(OK,mST->updateTexImage());
 
     dw->waitForFrame();
-    // Could fail here as SurfaceTexture thinks it still owns the slot
+    // Could fail here as GLConsumer thinks it still owns the slot
     // but bufferQueue has released all slots
     EXPECT_EQ(OK,mST->updateTexImage());
 
@@ -1136,7 +1231,7 @@ TEST_F(SurfaceTextureGLTest, DisconnectStressTest) {
 }
 
 
-// This test ensures that the SurfaceTexture clears the mCurrentTexture
+// This test ensures that the GLConsumer clears the mCurrentTexture
 // when it is disconnected and reconnected.  Otherwise it will
 // attempt to release a buffer that it does not owned
 TEST_F(SurfaceTextureGLTest, DisconnectClearsCurrentTexture) {
@@ -1581,7 +1676,7 @@ TEST_F(SurfaceTextureGLToGLTest, EglDestroySurfaceUnrefsBuffers) {
     // This test should have the only reference to buffer 0.
     EXPECT_EQ(1, buffers[0]->getStrongCount());
 
-    // The SurfaceTexture should hold a single reference to buffer 1 in its
+    // The GLConsumer should hold a single reference to buffer 1 in its
     // mCurrentBuffer member.  All of the references in the slots should have
     // been released.
     EXPECT_EQ(2, buffers[1]->getStrongCount());
@@ -1615,7 +1710,7 @@ TEST_F(SurfaceTextureGLToGLTest, EglDestroySurfaceAfterAbandonUnrefsBuffers) {
         buffers[i] = mST->getCurrentBuffer();
     }
 
-    // Abandon the SurfaceTexture, releasing the ref that the SurfaceTexture has
+    // Abandon the GLConsumer, releasing the ref that the GLConsumer has
     // on buffers[2].
     mST->abandon();
 
@@ -1638,6 +1733,81 @@ TEST_F(SurfaceTextureGLToGLTest, EglDestroySurfaceAfterAbandonUnrefsBuffers) {
         EXPECT_EQ(1, buffers[2]->getStrongCount());
     }
 }
+
+TEST_F(SurfaceTextureGLToGLTest, EglMakeCurrentBeforeConsumerDeathUnrefsBuffers) {
+    sp<GraphicBuffer> buffer;
+
+    EXPECT_TRUE(eglMakeCurrent(mEglDisplay, mProducerEglSurface,
+            mProducerEglSurface, mProducerEglContext));
+
+    // Produce a frame
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_TRUE(eglSwapBuffers(mEglDisplay, mProducerEglSurface));
+    ASSERT_EQ(EGL_SUCCESS, eglGetError());
+
+    // Destroy the EGLSurface.
+    EXPECT_TRUE(eglDestroySurface(mEglDisplay, mProducerEglSurface));
+    ASSERT_EQ(EGL_SUCCESS, eglGetError());
+    mProducerEglSurface = EGL_NO_SURFACE;
+    mSTC.clear();
+    mANW.clear();
+    mTextureRenderer.clear();
+
+    // Consume a frame
+    ASSERT_EQ(NO_ERROR, mST->updateTexImage());
+    buffer = mST->getCurrentBuffer();
+
+    // Destroy the GL texture object to release its ref
+    GLuint texID = TEX_ID;
+    glDeleteTextures(1, &texID);
+
+    // make un-current, all references to buffer should be gone
+    EXPECT_TRUE(eglMakeCurrent(mEglDisplay, EGL_NO_SURFACE,
+            EGL_NO_SURFACE, EGL_NO_CONTEXT));
+
+    // Destroy consumer
+    mST.clear();
+
+    EXPECT_EQ(1, buffer->getStrongCount());
+}
+
+TEST_F(SurfaceTextureGLToGLTest, EglMakeCurrentAfterConsumerDeathUnrefsBuffers) {
+    sp<GraphicBuffer> buffer;
+
+    EXPECT_TRUE(eglMakeCurrent(mEglDisplay, mProducerEglSurface,
+            mProducerEglSurface, mProducerEglContext));
+
+    // Produce a frame
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_TRUE(eglSwapBuffers(mEglDisplay, mProducerEglSurface));
+    ASSERT_EQ(EGL_SUCCESS, eglGetError());
+
+    // Destroy the EGLSurface.
+    EXPECT_TRUE(eglDestroySurface(mEglDisplay, mProducerEglSurface));
+    ASSERT_EQ(EGL_SUCCESS, eglGetError());
+    mProducerEglSurface = EGL_NO_SURFACE;
+    mSTC.clear();
+    mANW.clear();
+    mTextureRenderer.clear();
+
+    // Consume a frame
+    ASSERT_EQ(NO_ERROR, mST->updateTexImage());
+    buffer = mST->getCurrentBuffer();
+
+    // Destroy the GL texture object to release its ref
+    GLuint texID = TEX_ID;
+    glDeleteTextures(1, &texID);
+
+    // Destroy consumer
+    mST.clear();
+
+    // make un-current, all references to buffer should be gone
+    EXPECT_TRUE(eglMakeCurrent(mEglDisplay, EGL_NO_SURFACE,
+            EGL_NO_SURFACE, EGL_NO_CONTEXT));
+
+    EXPECT_EQ(1, buffer->getStrongCount());
+}
+
 
 TEST_F(SurfaceTextureGLToGLTest, EglSurfaceDefaultsToSynchronousMode) {
     // This test requires 3 buffers to run on a single thread.
@@ -1847,7 +2017,7 @@ TEST_F(SurfaceTextureGLToGLTest, TexturingFromPreRotatedGLFilledBuffer) {
  * This test fixture is for testing GL -> GL texture streaming from one thread
  * to another.  It contains functionality to create a producer thread that will
  * perform GL rendering to an ANativeWindow that feeds frames to a
- * SurfaceTexture.  Additionally it supports interlocking the producer and
+ * GLConsumer.  Additionally it supports interlocking the producer and
  * consumer threads so that a specific sequence of calls can be
  * deterministically created by the test.
  *
@@ -1914,13 +2084,13 @@ protected:
     // FrameCondition is a utility class for interlocking between the producer
     // and consumer threads.  The FrameCondition object should be created and
     // destroyed in the consumer thread only.  The consumer thread should set
-    // the FrameCondition as the FrameAvailableListener of the SurfaceTexture,
+    // the FrameCondition as the FrameAvailableListener of the GLConsumer,
     // and should call both waitForFrame and finishFrame once for each expected
     // frame.
     //
     // This interlocking relies on the fact that onFrameAvailable gets called
-    // synchronously from SurfaceTexture::queueBuffer.
-    class FrameCondition : public SurfaceTexture::FrameAvailableListener {
+    // synchronously from GLConsumer::queueBuffer.
+    class FrameCondition : public GLConsumer::FrameAvailableListener {
     public:
         FrameCondition():
                 mFrameAvailable(false),
@@ -1951,7 +2121,7 @@ protected:
             ALOGV("-finishFrame");
         }
 
-        // This should be called by SurfaceTexture on the producer thread.
+        // This should be called by GLConsumer on the producer thread.
         virtual void onFrameAvailable() {
             Mutex::Autolock lock(mMutex);
             ALOGV("+onFrameAvailable");
