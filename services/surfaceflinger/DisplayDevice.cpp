@@ -29,6 +29,10 @@
 
 #include <gui/Surface.h>
 
+#include <GLES/gl.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
 #include <hardware/gralloc.h>
 
 #include "DisplayHardware/DisplaySurface.h"
