@@ -74,7 +74,7 @@ Surface::Surface(
     mConnectedToCpu = false;
     mProducerControlledByApp = controlledByApp;
     mSwapIntervalZero = false;
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#ifdef SURFACE_SKIP_FIRST_DEQUEUE
     mDequeuedOnce = false;
 #endif
 }
@@ -224,7 +224,7 @@ int Surface::dequeueBuffer(android_native_buffer_t** buffer, int* fenceFd) {
     }
 
     *buffer = gbuf.get();
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#ifdef SURFACE_SKIP_FIRST_DEQUEUE
     if (!mDequeuedOnce) mDequeuedOnce = true;
 #endif
     return OK;
@@ -317,7 +317,7 @@ int Surface::query(int what, int* value) const {
                 }
                 break;
             case NATIVE_WINDOW_QUEUES_TO_WINDOW_COMPOSER: {
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#ifdef SURFACE_SKIP_FIRST_DEQUEUE
                 if (!mDequeuedOnce) {
                     *value = 0;
                 } else

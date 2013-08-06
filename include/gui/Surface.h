@@ -255,7 +255,7 @@ private:
     // must be accessed from lock/unlock thread only
     Region mDirtyRegion;
 
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#ifdef SURFACE_SKIP_FIRST_DEQUEUE
     bool                        mDequeuedOnce;
 #endif
 };
