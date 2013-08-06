@@ -29,7 +29,7 @@
 
 #include <gui/Surface.h>
 
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#ifdef EGL_NEEDS_FNW
 #include <ui/FramebufferNativeWindow.h>
 #endif
 
@@ -95,7 +95,8 @@ DisplayDevice::DisplayDevice(
       mLayerStack(NO_LAYER_STACK),
       mOrientation()
 {
-#ifndef BOARD_EGL_NEEDS_LEGACY_FB
+    mNativeWindow = new Surface(mDisplaySurface->getIGraphicBufferProducer());
+#ifndef EGL_NEEDS_FNW
     ANativeWindow* const window = mNativeWindow.get();
 #else
     ANativeWindow* const window = new FramebufferNativeWindow();
