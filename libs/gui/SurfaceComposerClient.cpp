@@ -646,7 +646,6 @@ void SurfaceComposerClient::unblankDisplay(const sp<IBinder>& token) {
     ComposerService::getComposerService()->unblank(token);
 }
 
-#ifdef TOROPLUS_RADIO
 // TODO: Remove me.  Do not use.
 // This is a compatibility shim for one product whose drivers are depending on
 // this legacy function (when they shouldn't).
@@ -655,7 +654,6 @@ status_t SurfaceComposerClient::getDisplayInfo(
 {
     return getDisplayInfo(getBuiltInDisplay(displayId), info);
 }
-#endif
 
 #if defined(ICS_CAMERA_BLOB) || defined(MR0_CAMERA_BLOB)
 ssize_t SurfaceComposerClient::getDisplayWidth(int32_t displayId) {
@@ -708,10 +706,7 @@ ScreenshotClient::~ScreenshotClient() {
     ScreenshotClient::release();
 }
 
-#ifdef TOROPLUS_RADIO
-// TODO: Remove me.  Do not use.
-// This is a compatibility shim for one product whose drivers are depending on
-// this legacy function (when they shouldn't).
+#if defined(TOROPLUS_RADIO)
 status_t ScreenshotClient::update() {
     sp<ISurfaceComposer> sm(ComposerService::getComposerService());
     return update(sm->getBuiltInDisplay(0));
