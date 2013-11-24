@@ -34,6 +34,10 @@
 
 #include <private/gui/ComposerService.h>
 
+#ifdef QCOM_BSP
+#include <gralloc_priv.h>
+#endif
+
 namespace android {
 
 Surface::Surface(
@@ -61,6 +65,7 @@ Surface::Surface(
     mReqHeight = 0;
     mReqFormat = 0;
     mReqUsage = 0;
+    mReqSize = 0;
     mTimestamp = NATIVE_WINDOW_TIMESTAMP_AUTO;
     mCrop.clear();
     mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
@@ -115,9 +120,12 @@ int Surface::hook_queueBuffer(ANativeWindow* window,
 int Surface::hook_dequeueBuffer_DEPRECATED(ANativeWindow* window,
         ANativeWindowBuffer** buffer) {
     Surface* c = getSelf(window);
-    ANativeWindowBuffer* buf;
+    ANativeWindowBuffer* buf = NULL;
     int fenceFd = -1;
     int result = c->dequeueBuffer(&buf, &fenceFd);
+
+    if (result != NO_ERROR) return result;
+
     sp<Fence> fence(new Fence(fenceFd));
     int waitResult = fence->waitForever("dequeueBuffer_DEPRECATED");
     if (waitResult != OK) {
@@ -211,7 +219,7 @@ int Surface::dequeueBuffer(android_native_buffer_t** buffer, int* fenceFd) {
         }
     }
 
-    if (fence->isValid()) {
+    if ((fence != NULL) && fence->isValid()) {
         *fenceFd = fence->dup();
         if (*fenceFd == -1) {
             ALOGE("dequeueBuffer: error duping fence: %d", errno);
@@ -399,6 +407,9 @@ int Surface::perform(int operation, va_list args)
     case NATIVE_WINDOW_SET_BUFFERS_FORMAT:
         res = dispatchSetBuffersFormat(args);
         break;
+    case NATIVE_WINDOW_SET_BUFFERS_SIZE:
+        res = dispatchSetBuffersSize(args);
+        break;
     case NATIVE_WINDOW_LOCK:
         res = dispatchLock(args);
         break;
@@ -474,6 +485,11 @@ int Surface::dispatchSetBuffersFormat(va_list args) {
     return setBuffersFormat(f);
 }
 
+int Surface::dispatchSetBuffersSize(va_list args) {
+    int size = va_arg(args, int);
+    return setBuffersSize(size);
+}
+
 int Surface::dispatchSetScalingMode(va_list args) {
     int m = va_arg(args, int);
     return setScalingMode(m);
@@ -531,6 +547,7 @@ int Surface::disconnect(int api) {
         mReqWidth = 0;
         mReqHeight = 0;
         mReqUsage = 0;
+        mReqSize = 0;
         mCrop.clear();
         mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
         mTransform = 0;
@@ -628,6 +645,22 @@ int Surface::setBuffersFormat(int format)
 
     Mutex::Autolock lock(mMutex);
     mReqFormat = format;
+    return NO_ERROR;
+}
+
+int Surface::setBuffersSize(int size)
+{
+    ATRACE_CALL();
+    ALOGV("Surface::setBuffersSize");
+
+    if (size<0)
+        return BAD_VALUE;
+
+    Mutex::Autolock lock(mMutex);
+    if(mReqSize != (uint32_t)size) {
+        mReqSize = size;
+        mGraphicBufferProducer->setBuffersSize(size);
+    }
     return NO_ERROR;
 }
 
@@ -744,7 +777,15 @@ status_t Surface::lock(
             return err;
         }
         // we're intending to do software rendering from this point
+        // Do not overwrite the mReqUsage flag which was set by the client
+#ifdef QCOM_BSP
+        setUsage(mReqUsage & GRALLOC_USAGE_PRIVATE_EXTERNAL_ONLY |
+                mReqUsage & GRALLOC_USAGE_PRIVATE_INTERNAL_ONLY |
+                    GRALLOC_USAGE_SW_READ_OFTEN |
+                    GRALLOC_USAGE_SW_WRITE_OFTEN);
+#else
         setUsage(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN);
+#endif
     }
 
     ANativeWindowBuffer* out;
@@ -773,6 +814,7 @@ status_t Surface::lock(
         }
 
         // figure out if we can copy the frontbuffer back
+        int backBufferSlot(getSlotFromBufferLocked(backBuffer.get()));
         const sp<GraphicBuffer>& frontBuffer(mPostedBuffer);
         const bool canCopyBack = (frontBuffer != 0 &&
                 backBuffer->width  == frontBuffer->width &&
@@ -780,15 +822,19 @@ status_t Surface::lock(
                 backBuffer->format == frontBuffer->format);
 
         if (canCopyBack) {
-            // copy the area that is invalid and not repainted this round
-            const Region copyback(mDirtyRegion.subtract(newDirtyRegion));
+            Mutex::Autolock lock(mMutex);
+            Region oldDirtyRegion;
+            for(int i = 0 ; i < NUM_BUFFER_SLOTS; i++ ) {
+                if(i != backBufferSlot && !mSlots[i].dirtyRegion.isEmpty())
+                    oldDirtyRegion.orSelf(mSlots[i].dirtyRegion);
+            }
+            const Region copyback(oldDirtyRegion.subtract(newDirtyRegion));
             if (!copyback.isEmpty())
                 copyBlt(backBuffer, frontBuffer, copyback);
         } else {
             // if we can't copy-back anything, modify the user's dirty
             // region to make sure they redraw the whole buffer
             newDirtyRegion.set(bounds);
-            mDirtyRegion.clear();
             Mutex::Autolock lock(mMutex);
             for (size_t i=0 ; i<NUM_BUFFER_SLOTS ; i++) {
                 mSlots[i].dirtyRegion.clear();
@@ -798,15 +844,9 @@ status_t Surface::lock(
 
         { // scope for the lock
             Mutex::Autolock lock(mMutex);
-            int backBufferSlot(getSlotFromBufferLocked(backBuffer.get()));
-            if (backBufferSlot >= 0) {
-                Region& dirtyRegion(mSlots[backBufferSlot].dirtyRegion);
-                mDirtyRegion.subtract(dirtyRegion);
-                dirtyRegion = newDirtyRegion;
-            }
+            mSlots[backBufferSlot].dirtyRegion = newDirtyRegion;
         }
 
-        mDirtyRegion.orSelf(newDirtyRegion);
         if (inOutDirtyBounds) {
             *inOutDirtyBounds = newDirtyRegion.getBounds();
         }
