@@ -1283,6 +1283,7 @@ bool Layer::isIntOnly() const
     }
     return false;
 }
+
 #endif
 // ---------------------------------------------------------------------------
 }; // namespace android
