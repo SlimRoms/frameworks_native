@@ -774,6 +774,11 @@ status_t HWComposer::prepare() {
                         if (l.compositionType == HWC_FRAMEBUFFER) {
                             disp.hasFbComp = true;
                         }
+                        // If the composition type is BLIT, we set this to
+                        // trigger a FLIP
+                        if(l.compositionType == HWC_BLIT) {
+                            disp.hasFbComp = true;
+                        }
                         if (l.compositionType == HWC_OVERLAY) {
                             disp.hasOvComp = true;
                         }
@@ -801,11 +806,6 @@ status_t HWComposer::prepare() {
                         l.compositionType = HWC_FRAMEBUFFER;
                     }
                     if (l.compositionType == HWC_FRAMEBUFFER) {
-                        disp.hasFbComp = true;
-                    }
-                    // If the composition type is BLIT, we set this to
-                    // trigger a FLIP
-                    if(l.compositionType == HWC_BLIT) {
                         disp.hasFbComp = true;
                     }
                     if (l.compositionType == HWC_OVERLAY) {
