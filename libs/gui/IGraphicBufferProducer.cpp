@@ -298,6 +298,9 @@ size_t IGraphicBufferProducer::QueueBufferInput::getFlattenedSize() const {
     return sizeof(timestamp)
          + sizeof(isAutoTimestamp)
          + sizeof(crop)
+#ifdef QCOM_BSP
+         + sizeof(dirtyRect)
+#endif
          + sizeof(scalingMode)
          + sizeof(transform)
          + sizeof(async)
@@ -317,6 +320,9 @@ status_t IGraphicBufferProducer::QueueBufferInput::flatten(
     FlattenableUtils::write(buffer, size, timestamp);
     FlattenableUtils::write(buffer, size, isAutoTimestamp);
     FlattenableUtils::write(buffer, size, crop);
+#ifdef QCOM_BSP
+    FlattenableUtils::write(buffer, size, dirtyRect);
+#endif
     FlattenableUtils::write(buffer, size, scalingMode);
     FlattenableUtils::write(buffer, size, transform);
     FlattenableUtils::write(buffer, size, async);
@@ -330,6 +336,9 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
               sizeof(timestamp)
             + sizeof(isAutoTimestamp)
             + sizeof(crop)
+#ifdef QCOM_BSP
+            + sizeof(dirtyRect)
+#endif
             + sizeof(scalingMode)
             + sizeof(transform)
             + sizeof(async);
@@ -341,6 +350,9 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
     FlattenableUtils::read(buffer, size, timestamp);
     FlattenableUtils::read(buffer, size, isAutoTimestamp);
     FlattenableUtils::read(buffer, size, crop);
+#ifdef QCOM_BSP
+    FlattenableUtils::read(buffer, size, dirtyRect);
+#endif
     FlattenableUtils::read(buffer, size, scalingMode);
     FlattenableUtils::read(buffer, size, transform);
     FlattenableUtils::read(buffer, size, async);
