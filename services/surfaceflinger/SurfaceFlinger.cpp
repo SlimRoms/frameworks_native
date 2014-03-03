@@ -23,6 +23,9 @@
 #include <dlfcn.h>
 
 #include <EGL/egl.h>
+#ifdef USE_MHEAP_SCREENSHOT
+#include <GLES/gl.h>
+#endif
 
 #include <cutils/log.h>
 #include <cutils/properties.h>
@@ -154,6 +157,7 @@ SurfaceFlinger::SurfaceFlinger()
         mDebugInTransaction(0),
         mLastTransactionTime(0),
         mBootFinished(false),
+        mUseDithering(false),
         mPrimaryHWVsyncEnabled(false),
         mHWVsyncAvailable(false),
         mDaltonize(false)
@@ -570,6 +574,9 @@ void SurfaceFlinger::init() {
     ALOGI("Client API: %s", eglQueryString(mEGLDisplay, EGL_CLIENT_APIS)?:"Not Supported");
     ALOGI("EGLSurface: %d-%d-%d-%d, config=%p", r, g, b, a, mEGLConfig);
 
+    // assume red has minimum color depth
+    mMinColorDepth = r;
+
     // get a RenderEngine for the given display / config (can't fail)
     mRenderEngine = RenderEngine::create(mEGLDisplay, mEGLConfig);
 
@@ -607,6 +614,9 @@ void SurfaceFlinger::init() {
                 hw->acquireScreen();
             }
             mDisplays.add(token, hw);
+            if (!mUseDithering && bitsPerPixel(mHwc->getFormat(i)) <= 16) {
+                mUseDithering = true;
+            }
         }
     }
 
@@ -1590,16 +1600,24 @@ void SurfaceFlinger::computeVisibleRegions(size_t dpy,
 
     outDirtyRegion.clear();
     bool bIgnoreLayers = false;
-    int extOnlyLayerIndex = -1;
+    int indexLOI = -1;
     size_t i = currentLayers.size();
 #ifdef QCOM_BSP
     while (i--) {
         const sp<Layer>& layer = currentLayers[i];
         // iterate through the layer list to find ext_only layers and store
         // the index
-        if ((dpy && layer->isExtOnly())) {
-            extOnlyLayerIndex = i;
+        if (layer->isSecureDisplay()) {
+            bIgnoreLayers = true; //probably needs removing, for now I keep testing purpose
+            indexLOI = -1;
+            if(!dpy)
+                indexLOI = i;
             break;
+        }
+
+        if (dpy && layer->isExtOnly()) {
+            bIgnoreLayers = true;
+            indexLOI = i;
         }
     }
     i = currentLayers.size();
@@ -1614,7 +1632,9 @@ void SurfaceFlinger::computeVisibleRegions(size_t dpy,
         // Only add the layer marked as "external_only" to external list and
         // only remove the layer marked as "external_only" from primary list
         // and do not add the layer marked as "internal_only" to external list
-        if((bIgnoreLayers && extOnlyLayerIndex != (int)i) ||
+        // Add secure UI layers to primary and remove other layers from internal
+        //and external list
+        if((bIgnoreLayers && indexLOI != (int)i) ||
            (!dpy && layer->isExtOnly()) ||
            (dpy && layer->isIntOnly())) {
             // Ignore all other layers except the layers marked as ext_only
@@ -1871,8 +1891,12 @@ void SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& hw, const 
 
             // screen is already cleared here
             if (!region.isEmpty()) {
-                // can happen with SurfaceView
-                drawWormhole(hw, region);
+                if (cur != end) {
+                    if (cur->getCompositionType() != HWC_BLIT)
+                        // can happen with SurfaceView
+                        drawWormhole(hw, region);
+                } else
+                    drawWormhole(hw, region);
             }
         }
 
@@ -2768,6 +2792,9 @@ status_t SurfaceFlinger::onTransact(
             const int pid = ipc->getCallingPid();
             const int uid = ipc->getCallingUid();
             if ((uid != AID_GRAPHICS) &&
+#ifdef USE_MHEAP_SCREENSHOT
+                 (uid != AID_SYSTEM) &&
+#endif
                     !PermissionCache::checkPermission(sAccessSurfaceFlinger, pid, uid)) {
                 ALOGE("Permission Denial: "
                         "can't access SurfaceFlinger pid=%d, uid=%d", pid, uid);
@@ -2776,6 +2803,9 @@ status_t SurfaceFlinger::onTransact(
             break;
         }
         case CAPTURE_SCREEN:
+#ifdef USE_MHEAP_SCREENSHOT
+        case CAPTURE_SCREEN_DEPRECATED:
+#endif
         {
             // codes that require permission check
             IPCThreadState* ipc = IPCThreadState::self();
@@ -3019,9 +3049,18 @@ status_t SurfaceFlinger::captureScreen(const sp<IBinder>& display,
             Mutex::Autolock _l(flinger->mStateLock);
             sp<const DisplayDevice> hw(flinger->getDisplayDevice(display));
             bool useReadPixels = this->useReadPixels && !flinger->mGpuToCpuSupported;
-            result = flinger->captureScreenImplLocked(hw,
-                    producer, reqWidth, reqHeight, minLayerZ, maxLayerZ,
-                    useReadPixels);
+#ifdef USE_MHEAP_SCREENSHOT
+            if (!useReadPixels) {
+#endif
+                result = flinger->captureScreenImplLocked(hw,
+                        producer, reqWidth, reqHeight, minLayerZ, maxLayerZ,
+                        useReadPixels);
+#ifdef USE_MHEAP_SCREENSHOT
+            } else {
+                // Should never get here
+                return BAD_VALUE;
+            }
+#endif
             static_cast<GraphicProducerWrapper*>(producer->asBinder().get())->exit(result);
             return true;
         }
@@ -3085,9 +3124,16 @@ void SurfaceFlinger::renderScreenImplLocked(
         const Layer::State& state(layer->getDrawingState());
         if (state.layerStack == hw->getLayerStack()) {
             if (state.z >= minLayerZ && state.z <= maxLayerZ) {
+#ifdef QCOM_BSP
+                // dont render the secure Display Layer
+                if(layer->isSecureDisplay()) {
+                    continue;
+                }
+#endif
                 if (layer->isVisible()) {
                     if (filtering) layer->setFiltering(true);
-                    layer->draw(hw);
+                    if(!layer->isProtected())
+                           layer->draw(hw);
                     if (filtering) layer->setFiltering(false);
                 }
             }
@@ -3247,6 +3293,108 @@ void SurfaceFlinger::checkScreenshot(size_t w, size_t s, size_t h, void const* v
     }
 }
 
+#ifdef USE_MHEAP_SCREENSHOT
+status_t SurfaceFlinger::captureScreenImplCpuConsumerLocked(
+        const sp<const DisplayDevice>& hw,
+        sp<IMemoryHeap>* heap, uint32_t* w, uint32_t* h,
+        uint32_t reqWidth, uint32_t reqHeight,
+        uint32_t minLayerZ, uint32_t maxLayerZ)
+{
+    ATRACE_CALL();
+
+    // get screen geometry
+    const uint32_t hw_w = hw->getWidth();
+    const uint32_t hw_h = hw->getHeight();
+
+    if ((reqWidth > hw_w) || (reqHeight > hw_h)) {
+        ALOGE("size mismatch (%d, %d) > (%d, %d)",
+                reqWidth, reqHeight, hw_w, hw_h);
+        return BAD_VALUE;
+    }
+
+    reqWidth  = (!reqWidth)  ? hw_w : reqWidth;
+    reqHeight = (!reqHeight) ? hw_h : reqHeight;
+
+    status_t result = NO_ERROR;
+
+    renderScreenImplLocked(hw, reqWidth, reqHeight, minLayerZ, maxLayerZ, true);
+
+    size_t size = reqWidth * reqHeight * 4;
+    // allocate shared memory large enough to hold the
+    // screen capture
+    sp<MemoryHeapBase> base(
+            new MemoryHeapBase(size, 0, "screen-capture") );
+    void *vaddr = base->getBase();
+    glReadPixels(0, 0, reqWidth, reqHeight,
+            GL_RGBA, GL_UNSIGNED_BYTE, vaddr);
+    if (glGetError() == GL_NO_ERROR) {
+        *heap = base;
+        *w = reqWidth;
+        *h = reqHeight;
+        result = NO_ERROR;
+    } else {
+        result = INVALID_OPERATION;
+    }
+
+    return result;
+}
+
+status_t SurfaceFlinger::captureScreen(const sp<IBinder>& display,
+        sp<IMemoryHeap>* heap,
+        uint32_t* outWidth, uint32_t* outHeight,
+        uint32_t reqWidth, uint32_t reqHeight,
+        uint32_t minLayerZ, uint32_t maxLayerZ)
+{
+    if (CC_UNLIKELY(display == 0))
+        return BAD_VALUE;
+
+    class MessageCaptureScreen : public MessageBase {
+        SurfaceFlinger* flinger;
+        sp<IBinder> display;
+        sp<IMemoryHeap>* heap;
+        uint32_t* outWidth;
+        uint32_t* outHeight;
+        uint32_t reqWidth;
+        uint32_t reqHeight;
+        uint32_t minLayerZ;
+        uint32_t maxLayerZ;
+        status_t result;
+    public:
+        MessageCaptureScreen(SurfaceFlinger* flinger,
+                const sp<IBinder>& display, sp<IMemoryHeap>* heap,
+                uint32_t* outWidth, uint32_t* outHeight,
+                uint32_t reqWidth, uint32_t reqHeight,
+                uint32_t minLayerZ, uint32_t maxLayerZ)
+            : flinger(flinger), display(display), heap(heap),
+              outWidth(outWidth), outHeight(outHeight),
+              reqWidth(reqWidth), reqHeight(reqHeight),
+              minLayerZ(minLayerZ), maxLayerZ(maxLayerZ),
+              result(PERMISSION_DENIED)
+        {
+        }
+        status_t getResult() const {
+            return result;
+        }
+        virtual bool handler() {
+            Mutex::Autolock _l(flinger->mStateLock);
+            sp<const DisplayDevice> hw(flinger->getDisplayDevice(display));
+            result = flinger->captureScreenImplCpuConsumerLocked(hw, heap,
+                    outWidth, outHeight,
+                    reqWidth, reqHeight, minLayerZ, maxLayerZ);
+            return true;
+        }
+    };
+
+    sp<MessageBase> msg = new MessageCaptureScreen(this, display, heap,
+            outWidth, outHeight, reqWidth, reqHeight, minLayerZ, maxLayerZ);
+    status_t res = postMessageSync(msg);
+    if (res == NO_ERROR) {
+        res = static_cast<MessageCaptureScreen*>( msg.get() )->getResult();
+    }
+    return res;
+}
+#endif
+
 // ---------------------------------------------------------------------------
 
 SurfaceFlinger::LayerVector::LayerVector() {
@@ -3293,10 +3441,12 @@ SurfaceFlinger::DisplayDeviceState::DisplayDeviceState(DisplayDevice::DisplayTyp
 }; // namespace android
 
 
+#ifndef USE_MHEAP_SCREENSHOT
 #if defined(__gl_h_)
 #error "don't include gl/gl.h in this file"
 #endif
 
 #if defined(__gl2_h_)
 #error "don't include gl2/gl2.h in this file"
+#endif
 #endif

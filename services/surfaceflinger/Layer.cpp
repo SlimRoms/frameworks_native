@@ -68,6 +68,7 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client,
         mDebug(false),
         mFormat(PIXEL_FORMAT_NONE),
         mOpaqueLayer(true),
+        mNeedsDithering(false),
         mTransactionFlags(0),
         mQueuedFrames(0),
         mCurrentTransform(0),
@@ -198,6 +199,12 @@ status_t Layer::setBuffers( uint32_t w, uint32_t h,
     mSurfaceFlingerConsumer->setDefaultBufferSize(w, h);
     mSurfaceFlingerConsumer->setDefaultBufferFormat(format);
     mSurfaceFlingerConsumer->setConsumerUsageBits(getEffectiveUsage(0));
+
+    if (mFlinger->getUseDithering()) {
+        int displayMinColorDepth = mFlinger->getMinColorDepth();
+        int layerMinColorDepth = minColorDepth(format);
+        mNeedsDithering = (layerMinColorDepth > displayMinColorDepth);
+    }
 
     return NO_ERROR;
 }
@@ -508,7 +515,8 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip) const
         char property[PROPERTY_VALUE_MAX];
         if ((property_get("persist.gralloc.cp.level3", property, NULL) > 0) &&
                 (atoi(property) == 1)) {
-            canAllowGPU = true;
+            if(hw->getDisplayType() == HWC_DISPLAY_PRIMARY)
+             canAllowGPU = true;
         }
     }
 #endif
@@ -573,6 +581,7 @@ void Layer::clearWithOpenGL(const sp<const DisplayDevice>& hw, const Region& cli
 {
     RenderEngine& engine(mFlinger->getRenderEngine());
     computeGeometry(hw, mMesh);
+    engine.setDither(false);
     engine.setupFillWithColor(red, green, blue, alpha);
     engine.drawMesh(mMesh);
 }
@@ -619,6 +628,7 @@ void Layer::drawWithOpenGL(
     texCoords[3] = vec2(right, 1.0f - top);
 
     RenderEngine& engine(mFlinger->getRenderEngine());
+    engine.setDither(needsDithering());
     engine.setupLayerBlending(mPremultipliedAlpha, isOpaque(), s.alpha);
     engine.drawMesh(mMesh);
     engine.disableBlending();
@@ -1279,6 +1289,17 @@ bool Layer::isIntOnly() const
     if (activeBuffer != 0) {
         uint32_t usage = activeBuffer->getUsage();
         if(usage & GRALLOC_USAGE_PRIVATE_INTERNAL_ONLY)
+            return true;
+    }
+    return false;
+}
+
+bool Layer::isSecureDisplay() const
+{
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    if (activeBuffer != 0) {
+        uint32_t usage = activeBuffer->getUsage();
+        if(usage & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY)
             return true;
     }
     return false;
