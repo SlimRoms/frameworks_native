@@ -345,7 +345,7 @@ int Surface::queueBuffer(android_native_buffer_t* buffer, int fenceFd) {
     }
 
     mConsumerRunningBehind = (numPendingBuffers >= 2);
-
+    mDirtyRect.clear();
     return err;
 }
 
