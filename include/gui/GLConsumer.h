@@ -30,6 +30,11 @@
 #include <utils/Vector.h>
 #include <utils/threads.h>
 
+#ifdef STE_HARDWARE
+#include <hardware/copybit.h>
+#include <gui/IGraphicBufferAlloc.h>
+#endif
+
 namespace android {
 // ----------------------------------------------------------------------------
 
@@ -88,6 +93,11 @@ public:
 
     GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texureTarget,
             bool useFenceSync, bool isControlledByApp);
+
+#ifdef STE_HARDWARE
+    // Method for closing copybit device while abandoning the surface
+    virtual ~GLConsumer();
+#endif
 
     // updateTexImage acquires the most recently queued buffer, and sets the
     // image contents of the target texture to it.
@@ -206,6 +216,8 @@ public:
     status_t setConsumerUsageBits(uint32_t usage);
     status_t setTransformHint(uint32_t hint);
 
+    status_t convert(sp<GraphicBuffer> &srcBuf, sp<GraphicBuffer> &dstBuf);
+
     // detachFromContext detaches the GLConsumer from the calling thread's
     // current OpenGL ES context.  This context must be the same as the context
     // that was current for previous calls to updateTexImage.
@@ -253,6 +265,11 @@ protected:
     virtual status_t releaseBufferLocked(int slot,
             const sp<GraphicBuffer> graphicBuffer,
             EGLDisplay display, EGLSyncKHR eglFence);
+
+#ifdef STE_HARDWARE
+    // returns true if the slot still has the graphicBuffer in it.
+    virtual bool stillTracking(int slot, const sp<GraphicBuffer> graphicBuffer);
+#endif
 
     status_t releaseBufferLocked(int slot,
             const sp<GraphicBuffer> graphicBuffer, EGLSyncKHR eglFence) {
@@ -313,6 +330,11 @@ private:
         // createImage creates a new EGLImage from a GraphicBuffer.
         EGLImageKHR createImage(EGLDisplay dpy,
                 const sp<GraphicBuffer>& graphicBuffer, const Rect& crop);
+
+#ifdef STE_HARDWARE
+        // converts buffer to a suitable color format
+        status_t convert(sp<GraphicBuffer> &srcBuf, sp<GraphicBuffer> &dstBuf);
+#endif
 
         // Disallow copying
         EglImage(const EglImage& rhs);
@@ -474,6 +496,22 @@ private:
     // that no buffer is bound to the texture. A call to setBufferCount will
     // reset mCurrentTexture to INVALID_BUFFER_SLOT.
     int mCurrentTexture;
+
+#ifdef STE_HARDWARE
+    // mBlitEngine is the handle to the copybit device which will be used in
+    // case color transform is needed before the EGL image is created.
+    copybit_device_t* mBlitEngine;
+
+    // mGraphicBufferAlloc is the connection to SurfaceFlinger that is used to
+    // allocate new GraphicBuffer objects.
+    sp<IGraphicBufferAlloc> mGraphicBufferAlloc;
+
+    // mBlitSlots stores the buffers that have been allocated int the case
+    // of color transform. It is initialised to null pointer,s and gets
+    // filled in with the result of GLConsumer::updateAndReleaseLocked
+    sp<GraphicBuffer> mBlitSlots[BufferQueue::NUM_BLIT_BUFFER_SLOTS];
+    int mNextBlitSlot;
+#endif
 
     // mAttached indicates whether the ConsumerBase is currently attached to
     // an OpenGL ES context.  For legacy reasons, this is initialized to true,

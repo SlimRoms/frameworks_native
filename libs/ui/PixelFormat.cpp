@@ -158,6 +158,11 @@ ssize_t bitsPerPixel(PixelFormat format) {
         case PIXEL_FORMAT_RGBA_5551:
         case PIXEL_FORMAT_RGBA_4444:
             return 16;
+#ifdef STE_HARDWARE
+        case HAL_PIXEL_FORMAT_YCbCr_420_P:
+        case HAL_PIXEL_FORMAT_YCBCR42XMBN:
+            return 12;
+#endif
     }
     return BAD_VALUE;
 }

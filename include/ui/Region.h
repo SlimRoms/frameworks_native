@@ -214,6 +214,26 @@ Region& Region::operator += (const Point& pt) {
     return translateSelf(pt.x, pt.y);
 }
 // ---------------------------------------------------------------------------
+#ifdef STE_HARDWARE
+struct region_iterator : public copybit_region_t {
+    region_iterator(const Region& region)
+        : b(region.begin()), e(region.end()) {
+        this->next = iterate;
+    }
+private:
+    static int iterate(copybit_region_t const * self, copybit_rect_t* rect) {
+        region_iterator const* me = static_cast<region_iterator const*>(self);
+        if (me->b != me->e) {
+            *reinterpret_cast<Rect*>(rect) = *me->b++;
+            return 1;
+        }
+        return 0;
+    }
+    mutable Region::const_iterator b;
+    Region::const_iterator const e;
+};
+#endif
+// ---------------------------------------------------------------------------
 }; // namespace android
 
 #endif // ANDROID_UI_REGION_H

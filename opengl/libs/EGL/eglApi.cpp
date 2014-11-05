@@ -139,11 +139,13 @@ static const extention_map_t sExtensionMap[] = {
     { "eglGetSyncAttribKHR",
             (__eglMustCastToProperFunctionPointerType)&eglGetSyncAttribKHR },
 
+#ifndef STE_HARDWARE
     // EGL_NV_system_time
     { "eglGetSystemTimeFrequencyNV",
             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeFrequencyNV },
     { "eglGetSystemTimeNV",
             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeNV },
+#endif
 
     // EGL_KHR_wait_sync
     { "eglWaitSyncKHR",
@@ -1610,6 +1612,7 @@ EGLBoolean eglGpuPerfHintQCOM(EGLDisplay dpy, EGLContext ctx, EGLint *attrib_lis
 // ----------------------------------------------------------------------------
 // NVIDIA extensions
 // ----------------------------------------------------------------------------
+#ifndef STE_HARDWARE
 EGLuint64NV eglGetSystemTimeFrequencyNV()
 {
     clearError();
@@ -1627,6 +1630,7 @@ EGLuint64NV eglGetSystemTimeFrequencyNV()
 
     return setErrorQuiet(EGL_BAD_DISPLAY, 0);
 }
+#endif
 
 EGLuint64NV eglGetSystemTimeNV()
 {
