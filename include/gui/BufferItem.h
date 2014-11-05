@@ -32,8 +32,8 @@ namespace android {
 class Fence;
 class GraphicBuffer;
 
-class BufferItem : public Flattenable<BufferItem> {
-    friend class Flattenable<BufferItem>;
+class BufferItem : public Flattenable {
+    friend class Flattenable;
     size_t getPodSize() const;
     size_t getFlattenedSize() const;
     size_t getFdCount() const;
