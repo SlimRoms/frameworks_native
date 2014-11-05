@@ -41,6 +41,10 @@ public:
         PRESENT_LATER = IGraphicBufferConsumer::PRESENT_LATER,
     };
 
+#ifdef STE_HARDWARE
+    enum { NUM_BLIT_BUFFER_SLOTS = 2 };
+#endif
+
     // When in async mode we reserve two slots in order to guarantee that the
     // producer and consumer can run asynchronously.
     enum { MAX_MAX_ACQUIRED_BUFFERS = NUM_BUFFER_SLOTS - 2 };
