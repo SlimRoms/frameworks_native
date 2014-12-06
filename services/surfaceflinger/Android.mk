@@ -13,6 +13,7 @@ LOCAL_SRC_FILES := \
     FrameTracker.cpp \
     Layer.cpp \
     LayerDim.cpp \
+    LayerBlur.cpp \
     MessageQueue.cpp \
     MonitoredProducer.cpp \
     SurfaceFlinger.cpp \
