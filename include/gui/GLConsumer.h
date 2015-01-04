@@ -321,6 +321,11 @@ private:
         const native_handle* graphicBufferHandle() {
             return mGraphicBuffer == NULL ? NULL : mGraphicBuffer->handle;
         }
+#ifdef STE_HARDWARE
+        void setGraphicBuffer(sp<GraphicBuffer> graphicBuffer) {
+            mGraphicBuffer = graphicBuffer;
+        }
+#endif
 
     private:
         // Only allow instantiation using ref counting.
