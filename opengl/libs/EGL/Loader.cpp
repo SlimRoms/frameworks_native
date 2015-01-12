@@ -416,7 +416,7 @@ void *Loader::load_driver(const char* kind,
                         (unsigned int *)dlsym(imgegl, "PVRDefaultPBS");
                 if (PVRDefaultPBS) {
                     ALOGD("setting default PBS to 512KB, was %d KB", *PVRDefaultPBS / 1024);
-                    *PVRDefaultPBS = 512*1024;
+                    *PVRDefaultPBS = 4096*1024;
                 }
             }
         }
