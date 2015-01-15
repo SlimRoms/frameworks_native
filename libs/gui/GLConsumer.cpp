@@ -447,6 +447,13 @@ status_t GLConsumer::updateAndReleaseLocked(const BufferQueue::BufferItem& item)
         }
         /* allocate convert buffer if needed */
         if (mBlitSlots[mNextBlitSlot] == NULL) {
+            if(mGraphicBufferAlloc == NULL) {
+
+                /* For some reason this is not being initialized in the constructor.
+                   So, we will create it here if it's null. */
+                sp<ISurfaceComposer> composer(ComposerService::getComposerService());
+                mGraphicBufferAlloc = composer->createGraphicBufferAlloc();
+            }
             status_t res;
             sp<GraphicBuffer> srcBuf = mSlots[buf].mGraphicBuffer;
             sp<GraphicBuffer> dstBuf(mGraphicBufferAlloc->createGraphicBuffer(srcBuf->getWidth(),
@@ -470,6 +477,7 @@ status_t GLConsumer::updateAndReleaseLocked(const BufferQueue::BufferItem& item)
             return UNKNOWN_ERROR;
         }
         textureBuffer = mBlitSlots[mNextBlitSlot];
+        mEglSlots[buf].mEglImage = new EglImage(textureBuffer);
         mNextBlitSlot = (mNextBlitSlot + 1) % BufferQueue::NUM_BLIT_BUFFER_SLOTS;
     }
     else {
@@ -1151,6 +1159,16 @@ void GLConsumer::dumpLocked(String8& result, const char* prefix) const
 
 #ifdef STE_HARDWARE
 status_t GLConsumer::convert(sp<GraphicBuffer> &srcBuf, sp<GraphicBuffer> &dstBuf) {
+
+    /* For some reason mBlitEngine is not being initialized in
+    the constructor so we init' it before we use it. */
+    hw_module_t const* module;
+    if(mBlitEngine == NULL) {
+        if (hw_get_module(COPYBIT_HARDWARE_MODULE_ID, &module) == 0) {
+            copybit_open(module, &mBlitEngine);
+        }
+    }
+
     copybit_image_t dstImg;
     dstImg.w = dstBuf->getWidth();
     dstImg.h = dstBuf->getHeight();
