@@ -90,6 +90,10 @@ status_t getPixelFormatInfo(PixelFormat format, PixelFormatInfo* info)
     case HAL_PIXEL_FORMAT_YCbCr_422_I:
         info->bitsPerPixel = 16;
         goto done;
+#ifdef STE_HARDWARE
+    case HAL_PIXEL_FORMAT_YCbCr_420_P:
+    case HAL_PIXEL_FORMAT_YCBCR42XMBN:
+#endif
     case HAL_PIXEL_FORMAT_YCrCb_420_SP:
     case HAL_PIXEL_FORMAT_YV12:
         info->bitsPerPixel = 12;
@@ -158,11 +162,6 @@ ssize_t bitsPerPixel(PixelFormat format) {
         case PIXEL_FORMAT_RGBA_5551:
         case PIXEL_FORMAT_RGBA_4444:
             return 16;
-#ifdef STE_HARDWARE
-        case HAL_PIXEL_FORMAT_YCbCr_420_P:
-        case HAL_PIXEL_FORMAT_YCBCR42XMBN:
-            return 12;
-#endif
     }
     return BAD_VALUE;
 }

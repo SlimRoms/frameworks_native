@@ -480,12 +480,6 @@ status_t GLConsumer::updateAndReleaseLocked(const BufferQueue::BufferItem& item)
         mEglSlots[buf].mEglImage = new EglImage(textureBuffer);
         mNextBlitSlot = (mNextBlitSlot + 1) % BufferQueue::NUM_BLIT_BUFFER_SLOTS;
     }
-    else {
-        textureBuffer = mSlots[buf].mGraphicBuffer;
-    }
-
-    // Set EglImage to use the new textureBuffer
-    mEglSlots[buf].mEglImage->setGraphicBuffer(textureBuffer);
 #endif
 
     // Ensure we have a valid EglImageKHR for the slot, creating an EglImage
@@ -493,14 +487,8 @@ status_t GLConsumer::updateAndReleaseLocked(const BufferQueue::BufferItem& item)
     // ConsumerBase.
     // We may have to do this even when item.mGraphicBuffer == NULL (which
     // means the buffer was previously acquired).
-
-#ifdef STE_HARDWARE
-    // Force EglImage to destroy old eglImage and create a new one
-    // using textureBuffer.
-    err = mEglSlots[buf].mEglImage->createIfNeeded(mEglDisplay, item.mCrop, true);
-#else
     err = mEglSlots[buf].mEglImage->createIfNeeded(mEglDisplay, item.mCrop);
-#endif
+
     if (err != NO_ERROR) {
         ST_LOGW("updateAndRelease: unable to createImage on display=%p slot=%d",
                 mEglDisplay, buf);
@@ -516,12 +504,8 @@ status_t GLConsumer::updateAndReleaseLocked(const BufferQueue::BufferItem& item)
         // release the old buffer, so instead we just drop the new frame.
         // As we are still under lock since acquireBuffer, it is safe to
         // release by slot.
-#ifdef STE_HARDWARE
-        releaseBufferLocked(buf, textureBuffer,
-#else        
-        releaseBufferLocked(buf, mSlots[buf].mGraphicBuffer,
-#endif
-                mEglDisplay, EGL_NO_SYNC_KHR);
+
+        releaseBufferLocked(buf, mSlots[buf].mGraphicBuffer, mEglDisplay, EGL_NO_SYNC_KHR);
         return err;
     }
 
