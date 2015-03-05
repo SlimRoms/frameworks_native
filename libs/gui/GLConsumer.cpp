@@ -143,6 +143,21 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex,
     memcpy(mCurrentTransformMatrix, mtxIdentity,
             sizeof(mCurrentTransformMatrix));
 
+#ifdef STE_HARDWARE
+    hw_module_t const* module;
+    mBlitEngine = 0;
+    if (hw_get_module(COPYBIT_HARDWARE_MODULE_ID, &module) == 0) {
+        copybit_open(module, &mBlitEngine);
+    }
+    ALOGE_IF(!mBlitEngine, "\nCannot open copybit mBlitEngine=%p", mBlitEngine);
+
+    sp<ISurfaceComposer> composer(ComposerService::getComposerService());
+          mGraphicBufferAlloc = composer->createGraphicBufferAlloc();
+    if (mGraphicBufferAlloc == 0) {
+        ST_LOGE("createGraphicBufferAlloc() failed in SurfaceTexture()");
+    }
+#endif
+
     mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
 #ifdef QCOM_BSP
     mCurrentDirtyRect.clear();
@@ -166,6 +181,9 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget,
     mEglDisplay(EGL_NO_DISPLAY),
     mEglContext(EGL_NO_CONTEXT),
     mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
+#ifdef STE_HARDWARE
+    mNextBlitSlot(0),
+#endif
     mAttached(false)
 {
     ST_LOGV("GLConsumer");
