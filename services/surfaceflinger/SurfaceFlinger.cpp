@@ -2172,9 +2172,8 @@ bool SurfaceFlinger::computeTiledDr(const sp<const DisplayDevice>& hw) {
 #endif
 
 #ifdef SWAP_BUFFERS_WORKAROUND
-int SurfaceFlinger::getNumVisibleRegions() {
+int SurfaceFlinger::hasVisibleRegions() {
     HWComposer& hwc(getHwComposer());
-    int visibleRegions = 0;
     for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
         sp<const DisplayDevice> hw(mDisplays[dpy]);
         const int32_t id = hw->getHwcDisplayId();
@@ -2191,11 +2190,11 @@ int SurfaceFlinger::getNumVisibleRegions() {
                     Region visibleRegion;
                     visibleRegion.set(bounds);
                     if (!visibleRegion.isEmpty())
-                        visibleRegions++;
+                        return 1;
                 }
             }
     }
-    return visibleRegions;
+    return 0;
 }
 #endif
 
