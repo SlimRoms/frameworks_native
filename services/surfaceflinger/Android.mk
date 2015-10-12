@@ -35,11 +35,7 @@ LOCAL_SRC_FILES := \
     RenderEngine/GLES10RenderEngine.cpp \
     RenderEngine/GLES11RenderEngine.cpp \
     RenderEngine/GLES20RenderEngine.cpp \
-    DisplayUtils.cpp \
-    ExSurfaceFlinger/ExLayer.cpp \
-    ExSurfaceFlinger/ExSurfaceFlinger.cpp \
-    ExSurfaceFlinger/ExVirtualDisplaySurface.cpp \
-    ExSurfaceFlinger/ExHWComposer.cpp
+    DisplayUtils.cpp
 
 LOCAL_CFLAGS := -DLOG_TAG=\"SurfaceFlinger\"
 LOCAL_CFLAGS += -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
@@ -111,6 +107,11 @@ LOCAL_SHARED_LIBRARIES := \
     libpowermanager
 
 ifeq ($(TARGET_USES_QCOM_BSP), true)
+    LOCAL_SRC_FILES += \
+        ExSurfaceFlinger/ExLayer.cpp \
+        ExSurfaceFlinger/ExSurfaceFlinger.cpp \
+        ExSurfaceFlinger/ExVirtualDisplaySurface.cpp \
+        ExSurfaceFlinger/ExHWComposer.cpp
     LOCAL_C_INCLUDES += $(call project-path-for,qcom-display)/libgralloc
     LOCAL_C_INCLUDES += $(call project-path-for,qcom-display)/libqdutils
     LOCAL_SHARED_LIBRARIES += libqdutils

@@ -39,13 +39,14 @@
 #include "RenderEngine/RenderEngine.h"
 #include "DisplayHardware/FramebufferSurface.h"
 #include "DisplayUtils.h"
+#ifdef QTI_BSP
 #include <ExSurfaceFlinger/ExSurfaceFlinger.h>
 #include <ExSurfaceFlinger/ExLayer.h>
 #include <ExSurfaceFlinger/ExHWComposer.h>
 #include <ExSurfaceFlinger/ExVirtualDisplaySurface.h>
-#if QTI_BSP
 #include <gralloc_priv.h>
 #endif
+#include <cutils/properties.h>
 
 namespace android {
 
@@ -66,31 +67,34 @@ DisplayUtils* DisplayUtils::getInstance() {
 }
 
 SurfaceFlinger* DisplayUtils::getSFInstance() {
+#ifdef QTI_BSP
     if(sUseExtendedImpls) {
         return new ExSurfaceFlinger();
-    } else {
-        return new SurfaceFlinger();
     }
+#endif
+    return new SurfaceFlinger();
 }
 
 Layer* DisplayUtils::getLayerInstance(SurfaceFlinger* flinger,
                             const sp<Client>& client, const String8& name,
                             uint32_t w, uint32_t h, uint32_t flags) {
+#ifdef QTI_BSP
     if(sUseExtendedImpls) {
         return new ExLayer(flinger, client, name, w, h, flags);
-    } else {
-        return new Layer(flinger, client, name, w, h, flags);
     }
+#endif
+    return new Layer(flinger, client, name, w, h, flags);
 }
 
 HWComposer* DisplayUtils::getHWCInstance(
                         const sp<SurfaceFlinger>& flinger,
                         HWComposer::EventHandler& handler) {
+#ifdef QTI_BSP
     if(sUseExtendedImpls) {
         return new ExHWComposer(flinger, handler);
-    } else {
-        return new HWComposer(flinger,handler);
     }
+#endif
+    return new HWComposer(flinger,handler);
 }
 
 void DisplayUtils::initVDSInstance(HWComposer* hwc, int32_t hwcDisplayId,
@@ -99,6 +103,7 @@ void DisplayUtils::initVDSInstance(HWComposer* hwc, int32_t hwcDisplayId,
         sp<IGraphicBufferConsumer> bqConsumer, String8 currentStateDisplayName,
         bool currentStateIsSecure, int currentStateType)
 {
+#ifdef QTI_BSP
     if(sUseExtendedImpls) {
         if(hwc->isVDSEnabled()) {
             VirtualDisplaySurface* vds = new ExVirtualDisplaySurface(*hwc, hwcDisplayId,
@@ -114,11 +119,16 @@ void DisplayUtils::initVDSInstance(HWComposer* hwc, int32_t hwcDisplayId,
             producer = vds;
         }
     } else {
+#endif
+        (void)currentStateIsSecure;
+        (void)currentStateType;
         VirtualDisplaySurface* vds = new VirtualDisplaySurface(*hwc, hwcDisplayId,
                 currentStateSurface, bqProducer, bqConsumer, currentStateDisplayName);
         dispSurface = vds;
         producer = vds;
+#ifdef QTI_BSP
     }
+#endif
 }
 
 bool DisplayUtils::createV4L2BasedVirtualDisplay(HWComposer* hwc, int32_t &hwcDisplayId,
