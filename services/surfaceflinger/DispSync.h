@@ -27,7 +27,9 @@ namespace android {
 
 // Ignore present (retire) fences if the device doesn't have support for the
 // sync framework.
-#if defined(RUNNING_WITHOUT_SYNC_FRAMEWORK)
+#if defined(RUNNING_WITHOUT_SYNC_FRAMEWORK) || \
+        (VSYNC_EVENT_PHASE_OFFSET_NS == 0 && SF_VSYNC_EVENT_PHASE_OFFSET_NS == 0 && \
+        !defined(QCOM_BSP))
 static const bool kIgnorePresentFences = true;
 #else
 static const bool kIgnorePresentFences = false;

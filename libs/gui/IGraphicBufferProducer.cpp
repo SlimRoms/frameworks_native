@@ -42,6 +42,9 @@ enum {
     QUEUE_BUFFER,
     CANCEL_BUFFER,
     QUERY,
+#ifdef QCOM_BSP_LEGACY
+    SET_BUFFERS_SIZE,
+#endif
     CONNECT,
     DISCONNECT,
     SET_SIDEBAND_STREAM,
@@ -275,6 +278,20 @@ public:
         }
     }
 
+#ifdef QCOM_BSP_LEGACY
+    virtual status_t setBuffersSize(int size) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        data.writeInt32(size);
+        status_t result = remote()->transact(SET_BUFFERS_SIZE, data, &reply);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        result = reply.readInt32();
+        return result;
+    }
+#endif
+
     virtual status_t allowAllocation(bool allow) {
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
@@ -423,6 +440,15 @@ status_t BnGraphicBufferProducer::onTransact(
             reply->writeInt32(res);
             return NO_ERROR;
         }
+#ifdef QCOM_BSP_LEGACY
+        case SET_BUFFERS_SIZE: {
+            CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
+            int size = data.readInt32();
+            status_t res = setBuffersSize(size);
+            reply->writeInt32(res);
+            return NO_ERROR;
+        } break;
+#endif
         case CONNECT: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             sp<IProducerListener> listener;
@@ -499,6 +525,9 @@ size_t IGraphicBufferProducer::QueueBufferInput::getFlattenedSize() const {
          + sizeof(isAutoTimestamp)
          + sizeof(dataSpace)
          + sizeof(crop)
+#ifdef QCOM_BSP
+         + sizeof(dirtyRect)
+#endif
          + sizeof(scalingMode)
          + sizeof(transform)
          + sizeof(stickyTransform)
@@ -521,6 +550,9 @@ status_t IGraphicBufferProducer::QueueBufferInput::flatten(
     FlattenableUtils::write(buffer, size, isAutoTimestamp);
     FlattenableUtils::write(buffer, size, dataSpace);
     FlattenableUtils::write(buffer, size, crop);
+#ifdef QCOM_BSP
+    FlattenableUtils::write(buffer, size, dirtyRect);
+#endif
     FlattenableUtils::write(buffer, size, scalingMode);
     FlattenableUtils::write(buffer, size, transform);
     FlattenableUtils::write(buffer, size, stickyTransform);
@@ -540,6 +572,9 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
             + sizeof(isAutoTimestamp)
             + sizeof(dataSpace)
             + sizeof(crop)
+#ifdef QCOM_BSP
+            + sizeof(dirtyRect)
+#endif
             + sizeof(scalingMode)
             + sizeof(transform)
             + sizeof(stickyTransform)
@@ -553,6 +588,9 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
     FlattenableUtils::read(buffer, size, isAutoTimestamp);
     FlattenableUtils::read(buffer, size, dataSpace);
     FlattenableUtils::read(buffer, size, crop);
+#ifdef QCOM_BSP
+    FlattenableUtils::read(buffer, size, dirtyRect);
+#endif
     FlattenableUtils::read(buffer, size, scalingMode);
     FlattenableUtils::read(buffer, size, transform);
     FlattenableUtils::read(buffer, size, stickyTransform);

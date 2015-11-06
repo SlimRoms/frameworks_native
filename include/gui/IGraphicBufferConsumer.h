@@ -43,6 +43,10 @@ class NativeHandle;
 class IGraphicBufferConsumer : public IInterface {
 
 public:
+#ifdef QCOM_BSP
+        // mDirtyRect is the dirty rectangle for this buffer slot.
+        Rect mDirtyRect;
+#endif
     enum {
         // Returned by releaseBuffer, after which the consumer must
         // free any references to the just-released buffer that it might have.

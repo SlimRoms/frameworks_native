@@ -25,6 +25,9 @@
 #include <stdatomic.h>
 
 #include <EGL/egl.h>
+#ifdef USE_MHEAP_SCREENSHOT
+#include <GLES/gl.h>
+#endif
 
 #include <cutils/log.h>
 #include <cutils/properties.h>
@@ -77,8 +80,13 @@
 
 #include "RenderEngine/RenderEngine.h"
 #include <cutils/compiler.h>
+#ifdef QCOM_BSP
+#include <gralloc_priv.h>
+#endif
 #include "DisplayUtils.h"
-
+#ifdef QCOM_BSP
+#include <display_config.h>
+#endif
 #define DISPLAY_COUNT       1
 
 /*
@@ -124,6 +132,9 @@ const String16 sReadFramebuffer("android.permission.READ_FRAME_BUFFER");
 const String16 sDump("android.permission.DUMP");
 
 // ---------------------------------------------------------------------------
+#ifdef QCOM_BSP
+bool SurfaceFlinger::sExtendedMode = false;
+#endif
 
 SurfaceFlinger::SurfaceFlinger()
     :   BnSurfaceComposer(),
@@ -175,6 +186,18 @@ SurfaceFlinger::SurfaceFlinger()
             mDebugDDMS = 0;
         }
     }
+#ifdef QCOM_BSP
+    mCanUseGpuTileRender = false;
+    property_get("debug.sf.gpu_comp_tiling", value, "0");
+    mGpuTileRenderEnable = atoi(value) ? true : false;
+    if(mGpuTileRenderEnable)
+       ALOGV("DirtyRect optimization enabled for FULL GPU Composition");
+    mUnionDirtyRect.clear();
+    mUnionDirtyRectPrev.clear();
+    mDRCount = 0;
+    property_get("sys.disable_ext_animation", value, "0");
+    mDisableExtAnimation = atoi(value) ? true : false;
+#endif
     ALOGI_IF(mDebugRegion, "showupdates enabled");
     ALOGI_IF(mDebugDDMS, "DDMS debugging enabled");
 }
@@ -462,8 +485,13 @@ void SurfaceFlinger::init() {
         DisplayDevice::DisplayType type((DisplayDevice::DisplayType)i);
         // set-up the displays that are already connected
         if (mHwc->isConnected(i) || type==DisplayDevice::DISPLAY_PRIMARY) {
-            // All non-virtual displays are currently considered secure.
+#ifdef QCOM_BSP
+            // query from hwc if the non-virtual display is secure.
+            bool isSecure = mHwc->isSecure(i);;
+#else
+            // All non-virtual displays are currently considered secure
             bool isSecure = true;
+#endif
             createBuiltinDisplayLocked(type);
             wp<IBinder> token = mBuiltinDisplays[i];
 
@@ -653,9 +681,13 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
         info.presentationDeadline =
                 hwConfig.refresh - SF_VSYNC_EVENT_PHASE_OFFSET_NS + 1000000;
 
+#ifdef QCOM_BSP
+        // set secure info based on the hwcConfig
+        info.secure = hwConfig.secure;
+#else
         // All non-virtual displays are currently considered secure.
         info.secure = true;
-
+#endif
         configs->push_back(info);
     }
 
@@ -871,11 +903,24 @@ void SurfaceFlinger::onHotplugReceived(int type, bool connected) {
     if (uint32_t(type) < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES) {
         Mutex::Autolock _l(mStateLock);
         if (connected) {
+#ifdef QCOM_BSP
+            // query from hwc if the connected display is secure
+            bool secure = mHwc->isSecure(type);;
+#else
+            // All non-virtual displays are currently considered secure.
+            bool secure = true;
+#endif
             createBuiltinDisplayLocked((DisplayDevice::DisplayType)type);
         } else {
             mCurrentState.displays.removeItem(mBuiltinDisplays[type]);
             mBuiltinDisplays[type].clear();
+#ifdef QCOM_BSP
+            // if extended_mode is set, and set mVisibleRegionsDirty
+            // as we need to rebuildLayerStack
+            if(isExtendedMode()) {
             updateVisibleRegionsDirty();
+            }
+#endif
         }
         setTransactionFlags(eDisplayTransactionNeeded);
 
@@ -928,11 +973,24 @@ bool SurfaceFlinger::handleMessageInvalidate() {
     return handlePageFlip();
 }
 
+#ifdef QCOM_BSP
+/* Compute DirtyRegion, if DR optimization for GPU comp optimization
+ * is ON & and no external device is connected.*/
+void SurfaceFlinger::setUpTiledDr() {
+    if(mGpuTileRenderEnable && (mDisplays.size()==1)) {
+        const sp<DisplayDevice>& hw(mDisplays[HWC_DISPLAY_PRIMARY]);
+        mCanUseGpuTileRender = computeTiledDr(hw);
+    }
+}
+#endif
 void SurfaceFlinger::handleMessageRefresh() {
     ATRACE_CALL();
     preComposition();
     rebuildLayerStacks();
     setUpHWComposer();
+#ifdef QCOM_BSP
+    setUpTiledDr();
+#endif
     doDebugFlashRegions();
     doComposition();
     postComposition();
@@ -948,11 +1006,35 @@ void SurfaceFlinger::doDebugFlashRegions()
     for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
         const sp<DisplayDevice>& hw(mDisplays[dpy]);
         if (hw->isDisplayOn()) {
+#ifdef QCOM_BSP
+            // Use Union DR, if it is valid & GPU Tiled DR optimization is ON
+            if(mCanUseGpuTileRender && !mUnionDirtyRect.isEmpty()) {
+                // redraw the whole screen
+                doComposeSurfaces(hw, Region(hw->bounds()));
+                Region dirtyRegion(mUnionDirtyRect);
+                Rect dr = mUnionDirtyRect;
+                hw->eglSwapPreserved(true);
+                engine.startTileComposition(dr.left, (height-dr.bottom),
+                      (dr.right-dr.left),
+                      (dr.bottom-dr.top), 1);
+                // and draw the dirty region
+                engine.fillRegionWithColor(dirtyRegion, height, 1, 0, 1, 1);
+                engine.endTileComposition(GL_PRESERVE);
+                hw->compositionComplete();
+                hw->swapBuffers(getHwComposer());
+            } else
+#endif
+            {
             // transform the dirty region into this screen's coordinate space
             const Region dirtyRegion(hw->getDirtyRegion(repaintEverything));
             if (!dirtyRegion.isEmpty()) {
                 // redraw the whole screen
                 doComposeSurfaces(hw, Region(hw->bounds()));
+
+#ifdef QCOM_BSP
+                   if(mGpuTileRenderEnable)
+                       hw->eglSwapPreserved(false);
+#endif
 
                 // and draw the dirty region
                 const int32_t height = hw->getHeight();
@@ -1055,6 +1137,11 @@ void SurfaceFlinger::postComposition()
 }
 
 void SurfaceFlinger::rebuildLayerStacks() {
+#ifdef QCOM_BSP
+    char prop[PROPERTY_VALUE_MAX];
+    property_get("sys.extended_mode", prop, "0");
+    sExtendedMode = atoi(prop) ? true : false;
+#endif
     updateExtendedMode();
     // rebuild the visible layer list per screen
     if (CC_UNLIKELY(mVisibleRegionsDirty)) {
@@ -1158,7 +1245,31 @@ void SurfaceFlinger::setUpHWComposer() {
             const int32_t id = hw->getHwcDisplayId();
             if (id >= 0) {
                 bool freezeSurfacePresent = false;
+#ifdef QCOM_BSP
+                const size_t layerCount = layers.size();
+                // Look for ScreenShotSurface in external layer list, only when
+                // disable external rotation animation feature is enabled
+                if(mDisableExtAnimation && (id != HWC_DISPLAY_PRIMARY)) {
+                    for (size_t i = 0 ; i < layerCount ; ++i) {
+                        static int screenShotLen = strlen("ScreenshotSurface");
+                        const sp<Layer>& layer(layers[i]);
+                        const Layer::State& s(layer->getDrawingState());
+                        // check the layers associated with external display
+                        if(s.layerStack == hw->getLayerStack()) {
+                            if(!strncmp(layer->getName(), "ScreenshotSurface",
+                                    screenShotLen)) {
+                                // Screenshot layer is present, and animation in
+                                // progress
+                                freezeSurfacePresent = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+endif
+
                 isfreezeSurfacePresent(freezeSurfacePresent, hw, id);
+				
                 const Vector< sp<Layer> >& currentLayers(
                     hw->getVisibleLayersSortedByZ());
                 const size_t count = currentLayers.size();
@@ -1171,6 +1282,28 @@ void SurfaceFlinger::setUpHWComposer() {
                      */
                     const sp<Layer>& layer(currentLayers[i]);
                     layer->setPerFrameData(hw, *cur);
+#ifdef QCOM_BSP
+                    if(freezeSurfacePresent) {
+                        // if freezeSurfacePresent, set ANIMATING flag
+                        cur->setAnimating(true);
+                    } else {
+                        const KeyedVector<wp<IBinder>, DisplayDeviceState>&
+                                                draw(mDrawingState.displays);
+                        size_t dc = draw.size();
+                        for (size_t i=0 ; i<dc ; i++) {
+                            if (draw[i].isMainDisplay()) {
+                                 // Pass the current orientation to HWC
+                                 hwc.eventControl(HWC_DISPLAY_PRIMARY,
+                                         SurfaceFlinger::EVENT_ORIENTATION,
+                                         uint32_t(draw[i].orientation));
+                            }
+                        }
+                        if(!strncmp(layer->getName(), "SurfaceView",
+                                    11)) {
+                            lastSurfaceViewLayer = layer;
+                        }
+                    }
+#endif
                     setOrientationEventControl(freezeSurfacePresent,id);
                 }
             }
