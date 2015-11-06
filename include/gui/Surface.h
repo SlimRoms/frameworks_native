@@ -101,6 +101,12 @@ public:
      */
     void allocateBuffers();
 
+#ifdef QCOM_BSP
+    /* sets dirty rectangle of the buffer that gets queued next for the
+     * Surface */
+    status_t setDirtyRect(const Rect* dirtyRect);
+#endif
+
     /* Sets the generation number on the IGraphicBufferProducer and updates the
      * generation number on any buffers attached to the Surface after this call.
      * See IGBP::setGenerationNumber for more information. */
@@ -151,6 +157,9 @@ private:
     int dispatchSetCrop(va_list args);
     int dispatchSetPostTransformCrop(va_list args);
     int dispatchSetUsage(va_list args);
+#ifdef QCOM_BSP_LEGACY
+    int dispatchSetBuffersSize(va_list args);
+#endif
     int dispatchLock(va_list args);
     int dispatchUnlockAndPost(va_list args);
     int dispatchSetSidebandStream(va_list args);
@@ -181,6 +190,9 @@ protected:
     virtual int setCrop(Rect const* rect);
     virtual int setUsage(uint32_t reqUsage);
     virtual void setSurfaceDamage(android_native_rect_t* rects, size_t numRects);
+#ifdef QCOM_BSP_LEGACY
+    virtual int setBuffersSize(int size);
+#endif
 
 public:
     virtual int lock(ANativeWindow_Buffer* outBuffer, ARect* inOutDirtyBounds);
@@ -234,6 +246,11 @@ private:
     // at the next deuque operation. It is initialized to 0.
     uint32_t mReqUsage;
 
+#ifdef QCOM_BSP_LEGACY
+    // mReqSize is the size of the buffer that will be requested
+    // at the next dequeue operation. It is initialized to 0.
+    uint32_t mReqSize;
+#endif
     // mTimestamp is the timestamp that will be used for the next buffer queue
     // operation. It defaults to NATIVE_WINDOW_TIMESTAMP_AUTO, which means that
     // a timestamp is auto-generated when queueBuffer is called.
@@ -248,6 +265,11 @@ private:
     // that gets queued. It is set by calling setCrop.
     Rect mCrop;
 
+#ifdef QCOM_BSP
+    // mDirtyRect is the dirty rectangle set for the next buffer that gets
+    // queued. It is set by calling setDirtyRect.
+    Rect mDirtyRect;
+#endif
     // mScalingMode is the scaling mode that will be used for the next
     // buffers that get queued. It is set by calling setScalingMode.
     int mScalingMode;
@@ -317,6 +339,10 @@ private:
     // Stores the current generation number. See setGenerationNumber and
     // IGraphicBufferProducer::setGenerationNumber for more information.
     uint32_t mGenerationNumber;
+
+#ifdef SURFACE_SKIP_FIRST_DEQUEUE
+    bool mDequeuedOnce;
+#endif
 };
 
 }; // namespace android
