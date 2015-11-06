@@ -76,6 +76,11 @@ protected:
     virtual void disableTexturing();
     virtual void disableBlending();
 
+#ifdef QCOM_BSP
+    virtual void startTileComposition(int x , int y, int width,
+          int height,bool preserve );
+    virtual void endTileComposition(unsigned int preserveMask);
+#endif
     virtual void drawMesh(const Mesh& mesh);
 
     virtual size_t getMaxTextureSize() const;
