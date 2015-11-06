@@ -553,8 +553,9 @@ status_t BufferQueueProducer::queueBuffer(int slot,
     uint32_t stickyTransform;
     bool async;
     sp<Fence> fence;
-    input.deflate(&timestamp, &isAutoTimestamp, &dataSpace, &crop, &scalingMode,
-            &transform, &async, &fence, &stickyTransform);
+    input.deflate(&timestamp, &isAutoTimestamp, &dataSpace, &crop, 
+
+	&scalingMode, &transform, &async, &fence, &stickyTransform);
     Region surfaceDamage = input.getSurfaceDamage();
 
     if (fence == NULL) {
@@ -640,6 +641,9 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         item.mAcquireCalled = mSlots[slot].mAcquireCalled;
         item.mGraphicBuffer = mSlots[slot].mGraphicBuffer;
         item.mCrop = crop;
+#ifdef QCOM_BSP
+        item.mDirtyRect = dirtyRect;
+#endif
         item.mTransform = transform &
                 ~static_cast<uint32_t>(NATIVE_WINDOW_TRANSFORM_INVERSE_DISPLAY);
         item.mTransformToDisplayInverse =
@@ -957,6 +961,14 @@ status_t BufferQueueProducer::setSidebandStream(const sp<NativeHandle>& stream) 
     return NO_ERROR;
 }
 
+#ifdef QCOM_BSP_LEGACY
+status_t BufferQueueProducer::setBuffersSize(int size) {
+    BQ_LOGV("setBuffersSize: size=%d", size);
+    Mutex::Autolock _l(mCore->mMutex);
+    mCore->mAllocator->setGraphicBufferSize(size);
+    return NO_ERROR;
+}
+#endif
 void BufferQueueProducer::allocateBuffers(bool async, uint32_t width,
         uint32_t height, PixelFormat format, uint32_t usage) {
     ATRACE_CALL();
