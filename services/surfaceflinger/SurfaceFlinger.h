@@ -137,7 +137,12 @@ public:
     RenderEngine& getRenderEngine() const {
         return *mRenderEngine;
     }
-
+#ifdef QCOM_BSP
+    // Extended Mode - No video on primary and it will be shown full
+    // screen on External
+    static bool sExtendedMode;
+    static bool isExtendedMode() { return sExtendedMode; };
+#endif
 private:
     friend class Client;
     friend class DisplayEventConnection;
@@ -213,6 +218,13 @@ private:
             Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ,
             bool useIdentityTransform, ISurfaceComposer::Rotation rotation);
+#ifdef USE_MHEAP_SCREENSHOT
+    virtual status_t captureScreen(const sp<IBinder>& display, sp<IMemoryHeap>* heap,
+            uint32_t* width, uint32_t* height,
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+            uint32_t minLayerZ, uint32_t maxLayerZ,
+            bool useIdentityTransform, ISurfaceComposer::Rotation rotation);
+#endif
     virtual status_t getDisplayStats(const sp<IBinder>& display,
             DisplayStatInfo* stats);
     virtual status_t getDisplayConfigs(const sp<IBinder>& display,
@@ -371,7 +383,14 @@ private:
             const sp<IGraphicBufferProducer>& producer,
             Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ,
+#ifdef USE_MHEAP_SCREENSHOT
+    status_t captureScreenImplCpuConsumerLocked(
+            const sp<const DisplayDevice>& hw,
+            sp<IMemoryHeap>* heap, uint32_t* width, uint32_t* height,
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+            uint32_t minLayerZ, uint32_t maxLayerZ,
             bool useIdentityTransform, Transform::orientation_flags rotation);
+#endif
 
     /* ------------------------------------------------------------------------
      * EGL
@@ -516,6 +535,17 @@ private:
     nsecs_t mLastTransactionTime;
     bool mBootFinished;
     bool mForceFullDamage;
+#ifdef QCOM_BSP
+    // Set up the DirtyRect/flags for GPU Comp optimization if required.
+    void setUpTiledDr();
+    // Find out if GPU composition can use Dirtyregion optimization
+    // Get the union dirty rect to operate
+    bool computeTiledDr(const sp<const DisplayDevice>& hw);
+    enum {
+       GL_PRESERVE_NONE = 0,
+       GL_PRESERVE      = 1
+    };
+#endif
 
     // these are thread safe
     mutable MessageQueue mEventQueue;
@@ -547,6 +577,11 @@ private:
     nsecs_t mFrameBuckets[NUM_BUCKETS];
     nsecs_t mTotalTime;
     nsecs_t mLastSwapTime;
+	
+#ifdef QCOM_BSP
+    // Flag to disable external rotation animation feature.
+    bool mDisableExtAnimation;
+#endif
 };
 
 }; // namespace android

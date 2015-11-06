@@ -19,7 +19,9 @@
 #include "HWComposer.h"
 
 #include <gui/BufferItem.h>
-
+#ifdef QCOM_BSP
+#include <gralloc_priv.h>
+#endif
 // ---------------------------------------------------------------------------
 namespace android {
 // ---------------------------------------------------------------------------
@@ -525,6 +527,12 @@ void VirtualDisplaySurface::allocateBuffers(bool /* async */,
         uint32_t /* usage */) {
     // TODO: Should we actually allocate buffers for a virtual display?
 }
+
+#ifdef QCOM_BSP_LEGACY
+status_t VirtualDisplaySurface::setBuffersSize(int size) {
+   return mSource[SOURCE_SINK]->setBuffersSize(size);
+}
+#endif
 
 status_t VirtualDisplaySurface::allowAllocation(bool /* allow */) {
     return INVALID_OPERATION;

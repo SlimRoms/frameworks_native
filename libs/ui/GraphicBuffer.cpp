@@ -67,6 +67,22 @@ GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight,
     mInitCheck = initSize(inWidth, inHeight, inFormat, inUsage);
 }
 
+#ifdef QCOM_BSP_LEGACY
+GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight,
+        PixelFormat inFormat, uint32_t inUsage, uint32_t bufferSize)
+    : BASE(), mOwner(ownData), mBufferMapper(GraphicBufferMapper::get()),
+      mInitCheck(NO_ERROR)
+{
+    width  =
+    height =
+    stride =
+    format =
+    usage  = 0;
+    handle = NULL;
+    mInitCheck = initSize(inWidth, inHeight, inFormat, inUsage, bufferSize);
+}
+#endif
+
 GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight,
         PixelFormat inFormat, uint32_t inUsage, uint32_t inStride,
         native_handle_t* inHandle, bool keepOwnership)
