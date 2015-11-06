@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2013 The Android Open Source Project
- * Copyright (C) 2015 The CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +27,6 @@ enum {
     REGISTER_LISTENER = IBinder::FIRST_CALL_TRANSACTION,
     UNREGISTER_LISTENER,
     GET_PROPERTY,
-    GET_DOCK_PROPERTY,
 };
 
 class IBatteryPropertiesRegistrar : public IInterface {
@@ -38,7 +36,6 @@ public:
     virtual void registerListener(const sp<IBatteryPropertiesListener>& listener) = 0;
     virtual void unregisterListener(const sp<IBatteryPropertiesListener>& listener) = 0;
     virtual status_t getProperty(int id, struct BatteryProperty *val) = 0;
-    virtual status_t getDockProperty(int id, struct BatteryProperty *val) = 0;
 };
 
 class BnBatteryPropertiesRegistrar : public BnInterface<IBatteryPropertiesRegistrar> {

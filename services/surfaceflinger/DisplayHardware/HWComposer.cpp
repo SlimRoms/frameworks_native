@@ -176,6 +176,9 @@ HWComposer::HWComposer(
         config.height = mFbDev->height;
         config.xdpi = mFbDev->xdpi;
         config.ydpi = mFbDev->ydpi;
+#ifdef QCOM_BSP
+        config.secure = true; //XXX: Assuming primary is always true
+#endif
         config.refresh = nsecs_t(1e9 / mFbDev->fps);
         disp.configs.push_back(config);
         disp.currentConfig = 0;
@@ -190,11 +193,10 @@ HWComposer::HWComposer(
         // we don't have VSYNC support, we need to fake it
         mVSyncThread = new VSyncThread(*this);
     }
-
-    mDimComp = 0;
-    if (mHwc) {
-      mHwc->query(mHwc, HWC_BACKGROUND_LAYER_SUPPORTED, &mDimComp);
-    }
+#ifdef QCOM_BSP
+    property_get("debug.hwc.gpuTiledThreshold", value, "1.9");
+    mDynThreshold = atof(value);
+#endif
 }
 
 HWComposer::~HWComposer() {
@@ -341,6 +343,12 @@ static const uint32_t DISPLAY_ATTRIBUTES[] = {
     HWC_DISPLAY_HEIGHT,
     HWC_DISPLAY_DPI_X,
     HWC_DISPLAY_DPI_Y,
+#ifdef QCOM_BSP
+    //To specify if display is secure
+    //Primary is considered as secure always
+    //HDMI can be secure based on HDCP
+    HWC_DISPLAY_SECURE,
+#endif
     HWC_DISPLAY_NO_ATTRIBUTE,
 };
 #define NUM_DISPLAY_ATTRIBUTES (sizeof(DISPLAY_ATTRIBUTES) / sizeof(DISPLAY_ATTRIBUTES)[0])
@@ -396,6 +404,11 @@ status_t HWComposer::queryDisplayProperties(int disp) {
                 case HWC_DISPLAY_DPI_Y:
                     config.ydpi = values[i] / 1000.0f;
                     break;
+#ifdef QCOM_BSP
+                case HWC_DISPLAY_SECURE:
+                    config.secure = values[i];
+                    break;
+#endif
                 default:
                     ALOG_ASSERT(false, "unknown display attribute[%zu] %#x",
                             i, DISPLAY_ATTRIBUTES[i]);
@@ -505,6 +518,12 @@ float HWComposer::getDpiY(int disp) const {
     return mDisplayData[disp].configs[currentConfig].ydpi;
 }
 
+#ifdef QCOM_BSP
+bool HWComposer::isSecure(int disp) const {
+    size_t currentConfig = mDisplayData[disp].currentConfig;
+    return mDisplayData[disp].configs[currentConfig].secure;
+}
+#endif
 nsecs_t HWComposer::getRefreshPeriod(int disp) const {
     size_t currentConfig = mDisplayData[disp].currentConfig;
     return mDisplayData[disp].configs[currentConfig].refresh;
@@ -691,7 +710,16 @@ status_t HWComposer::prepare() {
             DisplayData& disp(mDisplayData[i]);
             disp.hasFbComp = false;
             disp.hasOvComp = false;
+#ifdef QCOM_BSP
+            disp.hasBlitComp = false;
+#endif
             if (disp.list) {
+#ifdef QCOM_BSP
+               //GPUTILERECT
+               prev_comp_map[i] = current_comp_map[i];
+               current_comp_map[i].reset();
+               current_comp_map[i].count = disp.list->numHwLayers-1;
+#endif
                 for (size_t i=0 ; i<disp.list->numHwLayers ; i++) {
                     hwc_layer_1_t& l = disp.list->hwLayers[i];
 
@@ -704,6 +732,9 @@ status_t HWComposer::prepare() {
                     if (l.compositionType == HWC_FRAMEBUFFER) {
                         disp.hasFbComp = true;
                     }
+#ifdef QCOM_BSP
+                        disp.hasBlitComp = true;
+#endif
                     if (l.compositionType == HWC_OVERLAY) {
                         disp.hasOvComp = true;
                     }
@@ -713,6 +744,13 @@ status_t HWComposer::prepare() {
                     if (l.compositionType == HWC_CURSOR_OVERLAY) {
                         disp.hasOvComp = true;
                     }
+#ifdef QCOM_BSP
+                    //GPUTILERECT
+                    if(l.compositionType != HWC_FRAMEBUFFER_TARGET &&
+                            disp.list->numHwLayers < MAX_LAYER_COUNT) {
+                        current_comp_map[i].compType[j] = l.compositionType;
+                    }
+#endif
                 }
                 if (disp.list->numHwLayers == (disp.framebufferTarget ? 1 : 0)) {
                     disp.hasFbComp = true;
@@ -725,6 +763,13 @@ status_t HWComposer::prepare() {
     return (status_t)err;
 }
 
+#ifdef QCOM_BSP
+bool HWComposer::hasBlitComposition(int32_t id) const {
+    if (!mHwc || uint32_t(id) > 31 || !mAllocatedDisplayIDs.hasBit(id))
+        return false;
+    return mDisplayData[id].hasBlitComp;
+}
+#endif
 bool HWComposer::hasHwcComposition(int32_t id) const {
     if (!mHwc || uint32_t(id)>31 || !mAllocatedDisplayIDs.hasBit(id))
         return false;
@@ -1077,6 +1122,22 @@ public:
         getLayer()->compositionType = HWC_SIDEBAND;
         getLayer()->sidebandStream = stream->handle();
     }
+#ifdef QCOM_BSP
+    virtual void setDirtyRect(const Rect& dirtyRect) {
+        Rect srcCrop;
+        srcCrop.left = int(ceilf(getLayer()->sourceCropf.left));
+        srcCrop.right = int(ceilf(getLayer()->sourceCropf.right));
+        srcCrop.top = int(ceilf(getLayer()->sourceCropf.top));
+        srcCrop.bottom = int(ceilf(getLayer()->sourceCropf.bottom));
+
+        /* DirtyRect is generated for the full buffer resolution. Crop the value
+         * for the hwc_layer_1_t::sourceCrop resolution before sending to HWC.
+         */
+        Rect finalDR;
+        srcCrop.intersect(dirtyRect, &finalDR);
+        getLayer()->dirtyRect = reinterpret_cast<hwc_rect_t const&>(finalDR);
+    }
+#endif
     virtual void setBuffer(const sp<GraphicBuffer>& buffer) {
         if (buffer == 0 || buffer->handle == 0) {
             getLayer()->compositionType = HWC_FRAMEBUFFER;
@@ -1195,9 +1256,15 @@ void HWComposer::dump(String8& result) const {
             result.appendFormat("  Display[%zd] configurations (* current):\n", i);
             for (size_t c = 0; c < disp.configs.size(); ++c) {
                 const DisplayConfig& config(disp.configs[c]);
+#ifdef QCOM_BSP
+                result.appendFormat("    %s%zd: %ux%u, xdpi=%f, ydpi=%f, secure=%d refresh=%" PRId64 "\n",
+                        c == disp.currentConfig ? "* " : "", c, config.width, config.height,
+                        config.xdpi, config.ydpi, config.secure, config.refresh);
+#else
                 result.appendFormat("    %s%zd: %ux%u, xdpi=%f, ydpi=%f, refresh=%" PRId64 "\n",
                         c == disp.currentConfig ? "* " : "", c, config.width, config.height,
                         config.xdpi, config.ydpi, config.refresh);
+#endif
             }
 
             if (disp.list) {
@@ -1249,6 +1316,11 @@ void HWComposer::dump(String8& result) const {
                                         intptr_t(l.handle), l.hints, l.flags, l.transform, l.blending, formatStr.string(),
                                         l.sourceCropf.left, l.sourceCropf.top, l.sourceCropf.right, l.sourceCropf.bottom,
                                         l.displayFrame.left, l.displayFrame.top, l.displayFrame.right, l.displayFrame.bottom,
+#ifdef QCOM_BSP
+                                        l.dirtyRect.left, l.dirtyRect.top, l.dirtyRect.right, l.dirtyRect.bottom,
+#else
+                                        0, 0, 0, 0,
+#endif
                                         name.string());
                     } else {
                         result.appendFormat(
@@ -1257,6 +1329,11 @@ void HWComposer::dump(String8& result) const {
                                         intptr_t(l.handle), l.hints, l.flags, l.transform, l.blending, formatStr.string(),
                                         l.sourceCrop.left, l.sourceCrop.top, l.sourceCrop.right, l.sourceCrop.bottom,
                                         l.displayFrame.left, l.displayFrame.top, l.displayFrame.right, l.displayFrame.bottom,
+#ifdef QCOM_BSP
+                                        l.dirtyRect.left, l.dirtyRect.top, l.dirtyRect.right, l.dirtyRect.bottom,
+#else
+                                        0, 0, 0, 0,
+#endif
                                         name.string());
                     }
                 }
@@ -1345,5 +1422,172 @@ HWComposer::DisplayData::~DisplayData() {
     free(list);
 }
 
-// ---------------------------------------------------------------------------
+#ifdef QCOM_BSP
+//======================== GPU TiledRect/DR changes =====================
+bool HWComposer::areVisibleRegionsOverlapping(int32_t id ) {
+    if (!mHwc || uint32_t(id)>31 || !mAllocatedDisplayIDs.hasBit(id))
+        return false;
+    const Vector< sp<Layer> >& currentLayers  =
+            mFlinger->getLayerSortedByZForHwcDisplay(id);
+    size_t count = currentLayers.size();
+    Region consolidatedVisibleRegion;
+
+    for (size_t i=0; i<count; i++) {
+        //If there are any overlapping visible regions, disable GPUTileRect
+        if(!consolidatedVisibleRegion.intersect(
+                 currentLayers[i]->visibleRegion).isEmpty()){
+            return true;
+        }
+        consolidatedVisibleRegion.orSelf(currentLayers[i]->visibleRegion);
+    }
+    return false;
+}
+
+bool HWComposer::canHandleOverlapArea(int32_t id, Rect unionDr) {
+    DisplayData& disp(mDisplayData[id]);
+    float layerAreaSum = 0;
+    float drArea = ((unionDr.right-unionDr.left)* (unionDr.bottom-unionDr.top));
+    hwc_layer_1_t& fbLayer = disp.list->hwLayers[disp.list->numHwLayers-1];
+    hwc_rect_t fbDisplayFrame  = fbLayer.displayFrame;
+    float fbLayerArea = ((fbDisplayFrame.right - fbDisplayFrame.left)*
+              (fbDisplayFrame.bottom - fbDisplayFrame.top));
+
+    //Compute sum of the Areas of FB layers intersecting with Union Dirty Rect
+    for (size_t i=0; i<disp.list->numHwLayers-1; i++) {
+        hwc_layer_1_t& layer = disp.list->hwLayers[i];
+        if(layer.compositionType != HWC_FRAMEBUFFER)
+           continue;
+
+        hwc_rect_t displayFrame  = layer.displayFrame;
+        Rect df(displayFrame.left, displayFrame.top,
+              displayFrame.right, displayFrame.bottom);
+        Rect df_dirty;
+        df_dirty.clear();
+        if(df.intersect(unionDr, &df_dirty))
+            layerAreaSum += ((df_dirty.right - df_dirty.left)*
+                  (df_dirty.bottom - df_dirty.top));
+    }
+    ALOGD_IF(GPUTILERECT_DEBUG,"GPUTileRect: overlap/FB : %f",
+           (layerAreaSum/fbLayerArea));
+    // Return false, if the sum of layer Areas intersecting with union Dr is
+    // more than the threshold as we are not getting better performance.
+    return (mDynThreshold > (layerAreaSum/fbLayerArea));
+}
+
+bool HWComposer::needsScaling(int32_t id) {
+    if (!mHwc || uint32_t(id)>31 || !mAllocatedDisplayIDs.hasBit(id))
+        return false;
+    DisplayData& disp(mDisplayData[id]);
+    for (size_t i=0; i<disp.list->numHwLayers-1; i++) {
+        int dst_w, dst_h, src_w, src_h;
+        hwc_layer_1_t& layer = disp.list->hwLayers[i];
+        hwc_rect_t displayFrame  = layer.displayFrame;
+
+        hwc_rect_t sourceCropI = {0,0,0,0};
+        sourceCropI.left = int(ceilf(layer.sourceCropf.left));
+        sourceCropI.top = int(ceilf(layer.sourceCropf.top));
+        sourceCropI.right = int(floorf(layer.sourceCropf.right));
+        sourceCropI.bottom = int(floorf(layer.sourceCropf.bottom));
+
+        dst_w = displayFrame.right - displayFrame.left;
+        dst_h = displayFrame.bottom - displayFrame.top;
+        src_w = sourceCropI.right - sourceCropI.left;
+        src_h = sourceCropI.bottom - sourceCropI.top;
+
+        if(((src_w != dst_w) || (src_h != dst_h))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void HWComposer::computeUnionDirtyRect(int32_t id, Rect& unionDirtyRect) {
+    if (!mHwc || uint32_t(id)>31 || !mAllocatedDisplayIDs.hasBit(id))
+        return;
+    const Vector< sp<Layer> >& currentLayers =
+            mFlinger->getLayerSortedByZForHwcDisplay(id);
+    size_t count = currentLayers.size();
+    Region unionDirtyRegion;
+    DisplayData& disp(mDisplayData[id]);
+
+    // Find UnionDr of all layers
+    for (size_t i=0; i<count; i++) {
+        hwc_layer_1_t& l = disp.list->hwLayers[i];
+        Rect dr;
+        dr.clear();
+        if((l.compositionType == HWC_FRAMEBUFFER) &&
+              currentLayers[i]->hasNewFrame()) {
+            dr = Rect(l.dirtyRect.left, l.dirtyRect.top, l.dirtyRect.right,
+                  l.dirtyRect.bottom);
+            hwc_rect_t dst = l.displayFrame;
+
+            //Map dirtyRect to layer destination before using
+            hwc_rect_t src = {0,0,0,0};
+            src.left = int(ceilf(l.sourceCropf.left));
+            src.top = int(ceilf(l.sourceCropf.top));
+            src.right = int(floorf(l.sourceCropf.right));
+            src.bottom = int(floorf(l.sourceCropf.bottom));
+
+            int x_off = dst.left - src.left;
+            int y_off = dst.top - src.top;
+            dr = dr.offsetBy(x_off, y_off);
+            unionDirtyRegion = unionDirtyRegion.orSelf(dr);
+        }
+    }
+    unionDirtyRect = unionDirtyRegion.getBounds();
+}
+bool HWComposer::isCompositionMapChanged(int32_t id) {
+    if (prev_comp_map[id] == current_comp_map[id]) {
+        return false;
+    }
+    return true;
+}
+bool HWComposer::isGeometryChanged(int32_t id) {
+    if (!mHwc || uint32_t(id)>31 || !mAllocatedDisplayIDs.hasBit(id))
+        return false;
+    DisplayData& disp(mDisplayData[id]);
+    return ( disp.list->flags & HWC_GEOMETRY_CHANGED );
+}
+/* Finds if we can enable DR optimization for GpuComp
+ * 1. return false if geometry is changed
+ * 2. if overlapping visible regions present.
+ * 3. Compute a Union Dirty Rect to operate on. */
+bool HWComposer::canUseTiledDR(int32_t id, Rect& unionDr ){
+    if (!mHwc || uint32_t(id)>31 || !mAllocatedDisplayIDs.hasBit(id))
+        return false;
+
+    bool status = true;
+    if (isGeometryChanged(id)) {
+        ALOGD_IF(GPUTILERECT_DEBUG, "GPUTileRect : geometrychanged, disable");
+        status = false;
+    } else if ( hasBlitComposition(id)) {
+        ALOGD_IF(GPUTILERECT_DEBUG, "GPUTileRect: Blit comp, disable");
+        status = false;
+    } else if ( isCompositionMapChanged(id)) {
+        ALOGD_IF(GPUTILERECT_DEBUG, "GPUTileRect: comp map changed, disable");
+        status = false;
+    } else if (needsScaling(id)) {
+       /* Do Not use TiledDR optimization, if layers need scaling */
+       ALOGD_IF(GPUTILERECT_DEBUG, "GPUTileRect: Layers need scaling, disable");
+       status = false;
+    } else {
+        computeUnionDirtyRect(id, unionDr);
+        if(areVisibleRegionsOverlapping(id) &&
+              !canHandleOverlapArea(id, unionDr)){
+           /* With DR optimizaton, On certain targets we are seeing slightly
+            * lower FPS in use cases where visible regions overlap &
+            * the total dirty area of layers is greater than a threshold value.
+            * Hence this optimization has been disabled for such use cases */
+            ALOGD_IF(GPUTILERECT_DEBUG, "GPUTileRect: Visible \
+                 regions overlap & Total Dirty Area > Threashold, disable");
+            status = false;
+        } else if(unionDr.isEmpty()) {
+            ALOGD_IF(GPUTILERECT_DEBUG,"GPUTileRect: UnionDr is emtpy, \
+                  No need to PRESERVE");
+            status = false;
+        }
+    }
+    return status;
+}
+#endif
 }; // namespace android
