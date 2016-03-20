@@ -26,6 +26,12 @@ namespace android {
 
 // must be kept in sync with definitions in BatteryManager.java
 enum {
+    BATTERY_CHARGE_RATE_UNKNOWN = 1, // equals BatteryManager.BATTERY_CHARGE_RATE_UNKNOWN constant
+    BATTERY_CHARGE_RATE_FAST_CHARGING = 2, // equals BatteryManager.BATTERY_CHARGE_RATE_FAST_CHARGING constant
+};
+
+// must be kept in sync with definitions in BatteryManager.java
+enum {
     BATTERY_STATUS_UNKNOWN = 1, // equals BatteryManager.BATTERY_STATUS_UNKNOWN constant
     BATTERY_STATUS_CHARGING = 2, // equals BatteryManager.BATTERY_STATUS_CHARGING constant
     BATTERY_STATUS_DISCHARGING = 3, // equals BatteryManager.BATTERY_STATUS_DISCHARGING constant
@@ -58,6 +64,7 @@ struct BatteryProperties {
     bool chargerUsbOnline;
     bool chargerWirelessOnline;
     int batteryStatus;
+    int batteryChargeRate;
     int batteryHealth;
     bool batteryPresent;
     int batteryLevel;
