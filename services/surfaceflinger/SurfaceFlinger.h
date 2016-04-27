@@ -290,7 +290,8 @@ private:
         const sp<const DisplayDevice>& hw,
         const Region& region);
 #endif
-
+    virtual bool isS3DLayerPresent(const sp<const DisplayDevice>& /*hw*/)
+        { return false; };
     /* ------------------------------------------------------------------------
      * Message handling
      */

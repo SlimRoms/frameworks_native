@@ -184,7 +184,7 @@ public:
     uint32_t getTransactionFlags(uint32_t flags);
     uint32_t setTransactionFlags(uint32_t flags);
 
-    void computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
+    virtual void computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
             bool useIdentityTransform) const;
     Rect computeBounds(const Region& activeTransparentRegion) const;
     Rect computeBounds() const;
@@ -371,7 +371,8 @@ public:
                        HWComposer::HWCLayerInterface& /*layer */) { }
 #endif
     virtual bool canAllowGPUForProtected() const { return false; }
-
+    virtual void handleOpenGLDraw(const sp<const DisplayDevice>& /*hw*/,
+            Mesh& mesh) const;
 
     /*
      * returns the rectangle that crops the content of the layer and scales it
@@ -481,7 +482,7 @@ private:
     // drawing
     void clearWithOpenGL(const sp<const DisplayDevice>& hw, const Region& clip,
             float r, float g, float b, float alpha) const;
-    void drawWithOpenGL(const sp<const DisplayDevice>& hw, const Region& clip,
+    virtual void drawWithOpenGL(const sp<const DisplayDevice>& hw, const Region& clip,
             bool useIdentityTransform) const;
 
     // Temporary - Used only for LEGACY camera mode.
