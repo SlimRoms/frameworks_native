@@ -1,5 +1,9 @@
 #
+<<<<<<< HEAD
 # Copyright (C) 2014 The Android Open Source Project
+=======
+# Copyright (C) 2016 The CyanogenMod Project
+>>>>>>> 0921754... Add dalvik heap/hwui overrides for xxhdpi phone with 3072MB RAM
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,9 +21,9 @@
 # Provides overrides to configure the Dalvik heap for a 3G phone
 
 PRODUCT_PROPERTY_OVERRIDES += \
-    dalvik.vm.heapstartsize=24m \
-    dalvik.vm.heapgrowthlimit=320m \
-    dalvik.vm.heapsize=768m \
+    dalvik.vm.heapstartsize=8m \
+    dalvik.vm.heapgrowthlimit=256m \
+    dalvik.vm.heapsize=512m \
     dalvik.vm.heaptargetutilization=0.75 \
-    dalvik.vm.heapminfree=2m \
+    dalvik.vm.heapminfree=512k \
     dalvik.vm.heapmaxfree=8m
