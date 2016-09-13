@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "fab9d9a7_c451d2d9",
+        "filename": "services/inputflinger/InputReader.h",
+        "patchSetId": 2
+      },
+      "lineNbr": 254,
+      "author": {
+        "id": 1000043
+      },
+      "writtenOn": "2016-09-13T00:00:03Z",
+      "side": 1,
+      "message": "showTouches(false),\n            stylusPalmRejectionTime(50 * 10000000LL), // 50 ms\n    { }",
+      "range": {
+        "startLine": 253,
+        "startChar": 12,
+        "endLine": 254,
+        "endChar": 34
+      },
+      "revId": "e741a135b94e1f3907680fdd2181446c906a1ff3",
+      "serverId": "f8201d64-d729-4630-b91d-5f8be02869f0",
+      "unresolved": false
+    }
+  ]
+}
