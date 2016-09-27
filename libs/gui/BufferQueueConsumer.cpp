@@ -1,3 +1,4 @@
+
 /*
  * Copyright 2014 The Android Open Source Project
  *
@@ -717,7 +718,7 @@ sp<NativeHandle> BufferQueueConsumer::getSidebandStream() const {
     return mCore->mSidebandStream;
 }
 
-void BufferQueueConsumer::dump(String8& result, const char* prefix) const {
+void BufferQueueConsumer::dumpState(String8& result, const char* prefix) const {
     const IPCThreadState* ipc = IPCThreadState::self();
     const pid_t pid = ipc->getCallingPid();
     const uid_t uid = ipc->getCallingUid();
@@ -728,7 +729,7 @@ void BufferQueueConsumer::dump(String8& result, const char* prefix) const {
                 "from pid=%d, uid=%d\n", pid, uid);
         android_errorWriteWithInfoLog(0x534e4554, "27046057", uid, NULL, 0);
     } else {
-        mCore->dump(result, prefix);
+        mCore->dumpState(result, prefix);
     }
 }
 
