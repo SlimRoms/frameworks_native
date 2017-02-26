@@ -70,7 +70,6 @@ bool LayerDim::isVisible() const {
     return !(s.flags & layer_state_t::eLayerHidden) && s.alpha;
 }
 
-#ifndef USE_HWC2
 void LayerDim::setPerFrameData(const sp<const DisplayDevice>& hw,
         HWComposer::HWCLayerInterface& layer) {
   HWComposer& hwc = mFlinger->getHwComposer();
@@ -83,7 +82,6 @@ void LayerDim::setPerFrameData(const sp<const DisplayDevice>& hw,
   }
   Layer::setPerFrameData(hw, layer);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 

@@ -1279,7 +1279,7 @@ void SurfaceFlinger::rebuildLayerStacks() {
             const Transform& tr(displayDevice->getTransform());
             const Rect bounds(displayDevice->getBounds());
             if (displayDevice->isDisplayOn()) {
-                SurfaceFlinger::computeVisibleRegions(displayDevice->getHwcDisplayId(), layers,
+                SurfaceFlinger::computeVisibleRegions(layers,
                         displayDevice->getLayerStack(), dirtyRegion,
                         opaqueRegion);
 
@@ -1839,7 +1839,7 @@ void SurfaceFlinger::commitTransaction()
     mTransactionCV.broadcast();
 }
 
-void SurfaceFlinger::computeVisibleRegions(size_t /* dpy */,
+void SurfaceFlinger::computeVisibleRegions(
         const LayerVector& currentLayers, uint32_t layerStack,
         Region& outDirtyRegion, Region& outOpaqueRegion)
 {
@@ -3584,9 +3584,9 @@ status_t SurfaceFlinger::captureScreen(const sp<IBinder>& display,
         uint32_t minLayerZ,maxLayerZ;
         bool useIdentityTransform;
         Transform::orientation_flags rotation;
+        bool useReadPixels;
         status_t result;
         bool isLocalScreenshot;
-        bool useReadPixels;
     public:
         MessageCaptureScreen(SurfaceFlinger* flinger,
                 const sp<IBinder>& display,
