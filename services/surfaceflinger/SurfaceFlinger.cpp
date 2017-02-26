@@ -163,7 +163,6 @@ SurfaceFlinger::SurfaceFlinger()
         mPrimaryHWVsyncEnabled(false),
         mHWVsyncAvailable(false),
         mHasColorMatrix(false),
-        mHasSecondaryColorMatrix(false),
         mHasPoweredOff(false),
         mFrameBuckets(),
         mTotalTime(0),
