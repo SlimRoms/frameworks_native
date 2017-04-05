@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "1aa4ed85_462bb4eb",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer_hwc1.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 125,
+      "author": {
+        "id": 1000043
+      },
+      "writtenOn": "2017-04-05T17:09:33Z",
+      "side": 1,
+      "message": "Maybe use ifndef and shorter comment? Nothing is wrong with this mind you",
+      "range": {
+        "startLine": 122,
+        "startChar": 0,
+        "endLine": 125,
+        "endChar": 5
+      },
+      "revId": "bf9299c47dd1e78e68350d03c57cbd0c85ba7e24",
+      "serverId": "f8201d64-d729-4630-b91d-5f8be02869f0",
+      "unresolved": false
+    }
+  ]
+}
