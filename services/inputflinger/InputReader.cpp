@@ -835,6 +835,18 @@ void InputReader::cancelVibrate(int32_t deviceId, int32_t token) {
     }
 }
 
+bool InputReader::isInputDeviceEnabled(int32_t deviceId) {
+    AutoMutex _l(mLock);
+
+    ssize_t deviceIndex = mDevices.indexOfKey(deviceId);
+    if (deviceIndex >= 0) {
+        InputDevice* device = mDevices.valueAt(deviceIndex);
+        return device->isEnabled();
+    }
+    ALOGW("Ignoring invalid device id %" PRId32 ".", deviceId);
+    return false;
+}
+
 void InputReader::dump(String8& dump) {
     AutoMutex _l(mLock);
 
@@ -1011,6 +1023,26 @@ InputDevice::~InputDevice() {
     mMappers.clear();
 }
 
+bool InputDevice::isEnabled() {
+    return getEventHub()->isDeviceEnabled(mId);
+}
+
+void InputDevice::setEnabled(bool enabled, nsecs_t when) {
+    if (isEnabled() == enabled) {
+        return;
+    }
+
+    if (enabled) {
+        getEventHub()->enableDevice(mId);
+        reset(when);
+    } else {
+        reset(when);
+        getEventHub()->disableDevice(mId);
+    }
+    // Must change generation to flag this device as changed
+    bumpGeneration();
+}
+
 void InputDevice::dump(String8& dump) {
     InputDeviceInfo deviceInfo;
     getDeviceInfo(& deviceInfo);
@@ -1080,6 +1112,12 @@ void InputDevice::configure(nsecs_t when, const InputReaderConfiguration* config
                     bumpGeneration();
                 }
             }
+        }
+
+        if (!changes || (changes & InputReaderConfiguration::CHANGE_ENABLED_STATE)) {
+            ssize_t index = config->disabledDevices.indexOf(mId);
+            bool enabled = index < 0;
+            setEnabled(enabled, when);
         }
 
         size_t numMappers = mMappers.size();
@@ -2291,6 +2329,35 @@ bool KeyboardInputMapper::isKeyboardOrGamepadKey(int32_t scanCode) {
         || (scanCode >= BTN_JOYSTICK && scanCode < BTN_DIGI);
 }
 
+bool KeyboardInputMapper::isMediaKey(int32_t keyCode) {
+    switch (keyCode) {
+    case AKEYCODE_MEDIA_PLAY:
+    case AKEYCODE_MEDIA_PAUSE:
+    case AKEYCODE_MEDIA_PLAY_PAUSE:
+    case AKEYCODE_MUTE:
+    case AKEYCODE_HEADSETHOOK:
+    case AKEYCODE_MEDIA_STOP:
+    case AKEYCODE_MEDIA_NEXT:
+    case AKEYCODE_MEDIA_PREVIOUS:
+    case AKEYCODE_MEDIA_REWIND:
+    case AKEYCODE_MEDIA_RECORD:
+    case AKEYCODE_MEDIA_FAST_FORWARD:
+    case AKEYCODE_MEDIA_SKIP_FORWARD:
+    case AKEYCODE_MEDIA_SKIP_BACKWARD:
+    case AKEYCODE_MEDIA_STEP_FORWARD:
+    case AKEYCODE_MEDIA_STEP_BACKWARD:
+    case AKEYCODE_MEDIA_AUDIO_TRACK:
+    case AKEYCODE_VOLUME_UP:
+    case AKEYCODE_VOLUME_DOWN:
+    case AKEYCODE_VOLUME_MUTE:
+    case AKEYCODE_TV_AUDIO_DESCRIPTION:
+    case AKEYCODE_TV_AUDIO_DESCRIPTION_MIX_UP:
+    case AKEYCODE_TV_AUDIO_DESCRIPTION_MIX_DOWN:
+        return true;
+    }
+    return false;
+}
+
 void KeyboardInputMapper::processKey(nsecs_t when, bool down, int32_t scanCode,
         int32_t usageCode) {
     int32_t keyCode;
@@ -2364,7 +2431,7 @@ void KeyboardInputMapper::processKey(nsecs_t when, bool down, int32_t scanCode,
     // For internal keyboards, the key layout file should specify the policy flags for
     // each wake key individually.
     // TODO: Use the input device configuration to control this behavior more finely.
-    if (down && getDevice()->isExternal()) {
+    if (down && getDevice()->isExternal() && !isMediaKey(keyCode)) {
         policyFlags |= POLICY_FLAG_WAKE;
     }
 

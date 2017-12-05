@@ -16,8 +16,8 @@ COMMON_SRC_FILES := \
         utils.cpp
 COMMON_SHARED_LIBRARIES := \
         android.hardware.dumpstate@1.0 \
-        android.hidl.manager@1.0 \
         libhidlbase \
+        libhidltransport \
         libbase \
         libbinder \
         libcutils \
@@ -138,7 +138,7 @@ include $(BUILD_NATIVE_TEST)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := dumpstate_test_fixture
-
+LOCAL_COMPATIBILITY_SUITE := device-tests
 LOCAL_MODULE_TAGS := tests
 
 LOCAL_CFLAGS := $(COMMON_LOCAL_CFLAGS)

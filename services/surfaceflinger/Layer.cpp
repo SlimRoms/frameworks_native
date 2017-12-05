@@ -34,6 +34,7 @@
 #include <utils/StopWatch.h>
 #include <utils/Trace.h>
 
+#include <ui/DebugUtils.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/PixelFormat.h>
 
@@ -125,6 +126,7 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client,
         mPremultipliedAlpha = false;
 
     mName = name;
+    mTransactionName = String8("TX - ") + mName;
 
     mCurrentState.active.w = w;
     mCurrentState.active.h = h;
@@ -472,7 +474,7 @@ Rect Layer::computeInitialCrop(const sp<const DisplayDevice>& hw) const {
 
     Rect activeCrop(s.active.w, s.active.h);
     if (!s.crop.isEmpty()) {
-        activeCrop = s.crop;
+        activeCrop.intersect(s.crop, &activeCrop);
     }
 
     Transform t = getTransform();
@@ -893,9 +895,6 @@ void Layer::setPerFrameData(const sp<const DisplayDevice>& displayDevice) {
     }
 }
 
-android_dataspace Layer::getDataSpace() const {
-    return mCurrentState.dataSpace;
-}
 #else
 void Layer::setPerFrameData(const sp<const DisplayDevice>& hw,
         HWComposer::HWCLayerInterface& layer) {
@@ -1417,9 +1416,9 @@ void Layer::computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
 
 bool Layer::isOpaque(const Layer::State& s) const
 {
-    // if we don't have a buffer yet, we're translucent regardless of the
+    // if we don't have a buffer or sidebandStream yet, we're translucent regardless of the
     // layer's opaque flag.
-    if (mActiveBuffer == 0) {
+    if ((mSidebandStream == nullptr) && (mActiveBuffer == nullptr)) {
         return false;
     }
 
@@ -1505,6 +1504,7 @@ void Layer::pushPendingState() {
         mFlinger->setTransactionFlags(eTraversalNeeded);
     }
     mPendingStates.push_back(mCurrentState);
+    ATRACE_INT(mTransactionName.string(), mPendingStates.size());
 }
 
 void Layer::popPendingState(State* stateToCommit) {
@@ -1514,6 +1514,7 @@ void Layer::popPendingState(State* stateToCommit) {
             (stateToCommit->flags & stateToCommit->mask);
 
     mPendingStates.removeAt(0);
+    ATRACE_INT(mTransactionName.string(), mPendingStates.size());
 }
 
 bool Layer::applyPendingStates(State* stateToCommit) {
@@ -1926,6 +1927,10 @@ bool Layer::setDataSpace(android_dataspace dataSpace) {
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
+}
+
+android_dataspace Layer::getDataSpace() const {
+    return mCurrentState.dataSpace;
 }
 
 uint32_t Layer::getLayerStack() const {
@@ -2372,11 +2377,17 @@ void Layer::dump(String8& result, Colorizer& colorizer) const
     visibleRegion.dump(result, "visibleRegion");
     surfaceDamageRegion.dump(result, "surfaceDamageRegion");
     sp<Client> client(mClientRef.promote());
+    PixelFormat pf = PIXEL_FORMAT_UNKNOWN;
+    const sp<GraphicBuffer>& buffer(getActiveBuffer());
+    if (buffer != NULL) {
+        pf = buffer->getPixelFormat();
+    }
 
     result.appendFormat(            "      "
             "layerStack=%4d, z=%9d, pos=(%g,%g), size=(%4d,%4d), "
             "crop=(%4d,%4d,%4d,%4d), finalCrop=(%4d,%4d,%4d,%4d), "
             "isOpaque=%1d, invalidate=%1d, "
+            "dataspace=%s, pixelformat=%s "
 #ifdef USE_HWC2
             "alpha=%.3f, flags=0x%08x, tr=[%.2f, %.2f][%.2f, %.2f]\n"
 #else
@@ -2391,6 +2402,7 @@ void Layer::dump(String8& result, Colorizer& colorizer) const
             s.finalCrop.left, s.finalCrop.top,
             s.finalCrop.right, s.finalCrop.bottom,
             isOpaque(s), contentDirty,
+            dataspaceDetails(getDataSpace()).c_str(), decodePixelFormat(pf).c_str(),
             s.alpha, s.flags,
             s.active.transform[0][0], s.active.transform[0][1],
             s.active.transform[1][0], s.active.transform[1][1],

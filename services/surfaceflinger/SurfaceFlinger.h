@@ -58,7 +58,7 @@
 #include "LayerVector.h"
 #include "MessageQueue.h"
 #include "SurfaceInterceptor.h"
-#include "StartBootAnimThread.h"
+#include "StartPropertySetThread.h"
 
 #include "DisplayHardware/HWComposer.h"
 #include "Effects/Daltonizer.h"
@@ -227,7 +227,6 @@ private:
     enum { LOG_FRAME_STATS_PERIOD =  30*60*60 };
 
     static const size_t MAX_LAYERS = 4096;
-    static constexpr const char* kTimestampProperty = "service.sf.present_timestamp";
 
     // We're reference counted, never destroy SurfaceFlinger directly
     virtual ~SurfaceFlinger();
@@ -417,6 +416,14 @@ private:
             int32_t minLayerZ, int32_t maxLayerZ,
             bool yswap, bool useIdentityTransform, Transform::orientation_flags rotation);
 
+#ifdef USE_HWC2
+    status_t captureScreenImplLocked(const sp<const DisplayDevice>& device,
+                                     ANativeWindowBuffer* buffer, Rect sourceCrop,
+                                     uint32_t reqWidth, uint32_t reqHeight, int32_t minLayerZ,
+                                     int32_t maxLayerZ, bool useIdentityTransform,
+                                     Transform::orientation_flags rotation, bool isLocalScreenshot,
+                                     int* outSyncFd);
+#else
     status_t captureScreenImplLocked(
             const sp<const DisplayDevice>& hw,
             const sp<IGraphicBufferProducer>& producer,
@@ -424,8 +431,14 @@ private:
             int32_t minLayerZ, int32_t maxLayerZ,
             bool useIdentityTransform, Transform::orientation_flags rotation,
             bool isLocalScreenshot);
+#endif
 
-    sp<StartBootAnimThread> mStartBootAnimThread = nullptr;
+    sp<StartPropertySetThread> mStartPropertySetThread = nullptr;
+
+    /* ------------------------------------------------------------------------
+     * Properties
+     */
+    void readPersistentProperties();
 
     /* ------------------------------------------------------------------------
      * EGL
@@ -481,7 +494,7 @@ private:
 
     // mark a region of a layer stack dirty. this updates the dirty
     // region of all screens presenting this layer stack.
-    void invalidateLayerStack(uint32_t layerStack, const Region& dirty);
+    void invalidateLayerStack(const sp<const Layer>& layer, const Region& dirty);
 
 #ifndef USE_HWC2
     int32_t allocateHwcDisplayId(DisplayDevice::DisplayType type);
@@ -497,7 +510,7 @@ private:
      * Compositing
      */
     void invalidateHwcGeometry();
-    void computeVisibleRegions(uint32_t layerStack,
+    void computeVisibleRegions(const sp<const DisplayDevice>& displayDevice,
             Region& dirtyRegion, Region& opaqueRegion);
 
     void preComposition(nsecs_t refreshStartTime);
@@ -512,8 +525,10 @@ private:
 
     // Given a dataSpace, returns the appropriate color_mode to use
     // to display that dataSpace.
-    android_color_mode pickColorMode(android_dataspace dataSpace);
-    android_dataspace bestTargetDataSpace(android_dataspace a, android_dataspace b);
+    android_color_mode pickColorMode(android_dataspace dataSpace) const;
+    android_dataspace bestTargetDataSpace(android_dataspace a, android_dataspace b) const;
+
+    mat4 computeSaturationMatrix() const;
 
     void setUpHWComposer();
     void doComposition();
@@ -575,7 +590,12 @@ private:
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
-    void clearHwcLayers(const LayerVector& layers);
+    template<typename T>
+    void clearHwcLayers(const T& layers) {
+        for (size_t i = 0; i < layers.size(); ++i) {
+            layers[i]->clearHwcLayers();
+        }
+    }
     void resetHwcLocked();
 
     // Check to see if we should handoff to vr flinger.
@@ -696,6 +716,8 @@ private:
     };
     std::queue<CompositePresentTime> mCompositePresentTimes;
 
+    std::atomic<bool> mRefreshPending{false};
+
     /* ------------------------------------------------------------------------
      * Feature prototyping
      */
@@ -751,7 +773,10 @@ private:
     std::atomic<bool> mVrFlingerRequestsDisplay;
     static bool useVrFlinger;
 #endif
-    };
+
+    float mSaturation = 1.0f;
+    bool mForceNativeColorMode = false;
+};
 }; // namespace android
 
 #endif // ANDROID_SURFACE_FLINGER_H
