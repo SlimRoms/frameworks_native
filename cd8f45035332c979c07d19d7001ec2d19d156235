@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "1c7d8743_275600ad",
+        "filename": "opengl/libs/Android.bp",
+        "patchSetId": 1
+      },
+      "lineNbr": 104,
+      "author": {
+        "id": 1000131
+      },
+      "writtenOn": "2018-04-30T07:19:20Z",
+      "side": 1,
+      "message": "oops",
+      "revId": "cd8f45035332c979c07d19d7001ec2d19d156235",
+      "serverId": "f8201d64-d729-4630-b91d-5f8be02869f0",
+      "unresolved": false
+    }
+  ]
+}
